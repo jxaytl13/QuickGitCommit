@@ -1,0 +1,83 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements" editor="UnityEditor.UIElements" editor-extension-mode="False">
+    <ui:VisualElement name="root" class="root" style="flex-grow: 1; align-self: stretch;">
+        <ui:VisualElement name="header" class="card header" style="flex-grow: 0; flex-direction: column;">
+            <ui:VisualElement name="headerRow" class="row" style="flex-grow: 0; flex-direction: row; justify-content: flex-start; align-items: center;">
+                <uie:ObjectField name="targetField" label="目标资源" style="flex-grow: 1; flex-shrink: 1; align-items: flex-start; justify-content: flex-start; background-color: rgba(0, 0, 0, 0);" />
+                <ui:Button name="clearExcludeButton" text="清除排除" style="display: none;" />
+            </ui:VisualElement>
+            <ui:Label name="pathLabel" style="flex-shrink: 1; flex-grow: 0;" />
+            <ui:Label name="operationHintLabel" text="提示：单击文件名定位，快速双击文件名复制名称，快速双击路径复制路径。" class="operation-hint" style="flex-shrink: 1; flex-grow: 0;" />
+            <ui:Label name="statusLabel" />
+        </ui:VisualElement>
+        <ui:VisualElement name="filterBox" class="card filter-box" style="flex-grow: 0;">
+            <ui:Label name="filterTitle" text="条件筛选" class="title" style="flex-shrink: 1; flex-grow: 0; justify-content: flex-start; align-items: flex-start;" />
+            <ui:VisualElement name="typeRow" class="row" style="flex-direction: row; align-self: stretch; flex-grow: 0; justify-content: space-between; align-items: stretch;">
+                <ui:VisualElement style="flex-direction: row; align-items: center;">
+                    <ui:VisualElement name="addedContainer" class="type-container" style="align-self: stretch; flex-grow: 0; flex-direction: row-reverse; justify-content: flex-start; align-items: center; flex-wrap: nowrap; width: auto; flex-shrink: 1; margin-right: 30px;">
+                        <ui:Label name="addedLabel" text="新增" class="change-added-label" style="margin-left: 5px;" />
+                        <ui:Toggle name="toggleAdded" />
+                    </ui:VisualElement>
+                    <ui:VisualElement name="modifiedContainer" class="type-container" style="flex-grow: 0; flex-direction: row-reverse; justify-content: flex-end; align-items: center; width: auto; margin-right: 40px;">
+                        <ui:Label name="modifiedLabel" text="修改" class="change-modified-label" style="margin-left: 5px;" />
+                        <ui:Toggle name="toggleModified" />
+                    </ui:VisualElement>
+                    <ui:VisualElement name="deletedContainer" class="type-container" style="flex-direction: row-reverse; flex-grow: 0; justify-content: flex-end; width: auto; align-items: center;">
+                        <ui:Label name="deletedLabel" text="删除" class="change-deleted-label" style="margin-left: 5px;" />
+                        <ui:Toggle name="toggleDeleted" />
+                    </ui:VisualElement>
+                </ui:VisualElement>
+                <ui:VisualElement name="presetContainer" class="preset-container" style="flex-direction: row; justify-content: flex-end; flex-grow: 0; align-items: center;">
+                    <ui:Label name="presetLabel" text="时间" />
+                    <ui:DropdownField name="timePresetField" style="flex-shrink: 0; flex-grow: 0; margin-left: 20px; width: 100px;" />
+                </ui:VisualElement>
+            </ui:VisualElement>
+            <ui:Label text="时间范围 (格式: yyyy-MM-dd HH:mm)" style="align-items: flex-start; flex-grow: 0; flex-shrink: 1; margin-top: 10px;" />
+            <ui:VisualElement style="flex-direction: row; flex-grow: 0; justify-content: space-between; height: auto; align-items: stretch; flex-shrink: 1;">
+                <ui:VisualElement name="startRow" class="row" style="align-self: stretch; justify-content: flex-start; flex-direction: column; flex-grow: 1; align-items: center; height: auto; flex-shrink: 1;">
+                    <ui:TextField name="startTimeField" label="开始" style="flex-shrink: 1; flex-grow: 1; align-items: stretch; justify-content: flex-start;" />
+                    <ui:TextField name="endTimeField" label="结束" style="flex-shrink: 1; flex-grow: 1;" />
+                </ui:VisualElement>
+                <ui:VisualElement name="timeButtonRow" class="row" style="flex-direction: row; justify-content: space-around; flex-grow: 0; align-items: stretch; width: auto; height: auto; margin-left: 4px;">
+                    <ui:Button name="resetTimeButton" text="重置时间" class="primary-button" style="width: 80px;" />
+                    <ui:Button name="refreshButton" text="刷新" class="primary-button" style="width: 80px;" />
+                </ui:VisualElement>
+            </ui:VisualElement>
+        </ui:VisualElement>
+        <ui:VisualElement name="middleRow" class="middle-row" style="flex-direction: row; flex-grow: 1; justify-content: space-between;">
+            <ui:VisualElement name="leftCol" class="list-col left-col" style="flex-grow: 1; flex-shrink: 1; width: auto; margin-top: 0; margin-left: 5px;">
+                <ui:VisualElement name="unstagedHeaderRow" class="row header-row">
+                    <ui:VisualElement name="unstagedSelectAllContainer" class="row select-all-container" style="align-items: flex-start; flex-direction: row;">
+                        <ui:Toggle name="unstagedSelectAllToggle" />
+                        <ui:Label text="全选" />
+                    </ui:VisualElement>
+                    <ui:VisualElement name="unstagedHeaderSpacer" class="flex-spacer" />
+                    <ui:Label name="unstagedHeaderLabel" />
+                </ui:VisualElement>
+                <ui:ScrollView name="unstagedScrollView" />
+            </ui:VisualElement>
+            <ui:VisualElement name="middleCol" class="middle-col" style="flex-grow: 0; justify-content: space-between; width: 40px;">
+                <ui:Button name="toStagedButton" text="→" class="arrow-button" style="border-left-color: rgb(47, 47, 47); border-right-color: rgb(47, 47, 47); border-top-color: rgb(47, 47, 47); border-bottom-color: rgb(47, 47, 47); background-color: rgba(88, 88, 88, 0); flex-grow: 1;" />
+                <ui:Button name="toUnstagedButton" text="←" class="arrow-button" style="background-color: rgba(88, 88, 88, 0); flex-grow: 1;" />
+            </ui:VisualElement>
+            <ui:VisualElement name="rightCol" class="list-col right-col" style="flex-grow: 1; align-items: stretch; flex-direction: column; width: auto; margin-right: 5px;">
+                <ui:VisualElement name="stagedHeaderRow" class="row header-row">
+                    <ui:VisualElement name="stagedSelectAllContainer" class="row select-all-container" style="flex-direction: row; align-items: flex-start;">
+                        <ui:Toggle name="stagedSelectAllToggle" />
+                        <ui:Label text="全选" />
+                    </ui:VisualElement>
+                    <ui:VisualElement name="stagedHeaderSpacer" class="flex-spacer" />
+                    <ui:Label name="stagedHeaderLabel" />
+                </ui:VisualElement>
+                <ui:ScrollView name="stagedScrollView" />
+            </ui:VisualElement>
+        </ui:VisualElement>
+        <ui:VisualElement name="commitBox" class="card commit-box" style="align-self: stretch; flex-grow: 0; flex-direction: column; border-left-color: rgba(0, 0, 0, 0); border-right-color: rgba(0, 0, 0, 0); border-top-color: rgba(0, 0, 0, 0); border-bottom-color: rgba(0, 0, 0, 0);">
+            <ui:Label name="commitTitle" text="提交" enable-rich-text="true" class="title" style="flex-grow: 0; flex-shrink: 1; align-items: stretch; width: auto; height: auto; margin-top: 10px;" />
+            <ui:TextField name="commitMessageField" label="提交说明" style="flex-grow: 1; align-self: flex-start; align-items: center; flex-shrink: 1; height: auto;" />
+            <ui:VisualElement name="commitRow" class="row commit-row" style="flex-direction: row; align-items: flex-end; justify-content: space-between; align-self: stretch; flex-grow: 0; border-left-color: rgba(0, 0, 0, 0); border-right-color: rgba(0, 0, 0, 0); border-top-color: rgba(0, 0, 0, 0); border-bottom-color: rgba(0, 0, 0, 0); height: auto;">
+                <ui:Button name="commitButton" text="提交到本地" class="commit-local-button" style="flex-grow: 1;" />
+                <ui:Button name="commitAndPushButton" text="提交并推送" class="commit-push-button" style="flex-grow: 1;" />
+            </ui:VisualElement>
+        </ui:VisualElement>
+    </ui:VisualElement>
+</ui:UXML>

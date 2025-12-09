@@ -1,0 +1,130 @@
+.root {
+    flex-direction: column;
+    flex-grow: 1;
+    background-color: #1e1e1e;
+}
+
+.card {
+    flex-direction: column;
+    padding-left: 4px;
+    padding-right: 4px;
+    padding-top: 4px;
+    padding-bottom: 4px;
+    background-color: #252526;
+}
+
+.header {
+    margin-bottom: 4px;
+}
+
+.filter-box {
+    margin-bottom: 4px;
+}
+
+.row {
+    flex-direction: row;
+    align-items: center;
+}
+
+.flex-spacer {
+    flex-grow: 1;
+}
+
+.operation-hint {
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.7);
+    margin-top: 2px;
+}
+
+.middle-row {
+    flex-direction: row;
+    flex-grow: 1;
+}
+
+.list-col {
+    flex-direction: column;
+    flex-shrink: 0;
+    border-top-width: 1px;
+    border-bottom-width: 1px;
+    border-left-width: 1px;
+    border-right-width: 1px;
+    border-top-color: #3c3c3c;
+    border-bottom-color: #3c3c3c;
+    border-left-color: #3c3c3c;
+    border-right-color: #3c3c3c;
+    background-color: #252526;
+}
+
+.left-col {
+    flex-grow: 45;
+    margin-right: 4px;
+}
+
+.right-col {
+    flex-grow: 45;
+    margin-left: 4px;
+}
+
+.middle-col {
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: center;
+    flex-grow: 10;
+    flex-shrink: 0;
+    margin-left: 2px;
+    margin-right: 2px;
+}
+
+.arrow-button {
+    height: 22px;
+    margin-bottom: 6px;
+}
+
+.commit-box {
+    margin-top: 4px;
+    flex-shrink: 0;
+}
+
+.title {
+    -unity-font-style: bold;
+}
+
+.time-label {
+    min-width: 40px;
+    margin-right: 4px;
+}
+
+.select-all-container {
+    align-items: center;
+}
+
+.commit-row {
+    justify-content: flex-start;
+    margin-top: 4px;
+    flex-shrink: 0;
+}
+
+.commit-local-button {
+    flex-grow: 1;
+    height: 22px;
+    margin-right: 4px;
+    background-color: #40993f;
+}
+
+.commit-push-button {
+    flex-grow: 1;
+    height: 22px;
+    background-color: #336fbf;
+}
+
+.change-added-label {
+    color: rgb(128, 217, 128);
+}
+
+.change-modified-label {
+    color: rgb(242, 191, 102);
+}
+
+.change-deleted-label {
+    color: rgb(230, 128, 128);
+}

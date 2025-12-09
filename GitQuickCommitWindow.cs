@@ -197,6 +197,244 @@ namespace OneKey.GitTools
         {
             var root = rootVisualElement;
             root.Clear();
+            var visualTree = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>("Assets/Editor/QuickGitCommit/GitQuickCommitWindow.uxml");
+            if (visualTree != null)
+            {
+                visualTree.CloneTree(root);
+
+                var styleSheet = AssetDatabase.LoadAssetAtPath<StyleSheet>("Assets/Editor/QuickGitCommit/GitQuickCommitWindow.uss");
+                if (styleSheet != null)
+                {
+                    root.styleSheets.Add(styleSheet);
+                }
+
+                targetField = root.Q<ObjectField>("targetField");
+                if (targetField != null)
+                {
+                    targetField.objectType = typeof(UnityEngine.Object);
+                    targetField.allowSceneObjects = false;
+                    targetField.value = targetAsset;
+                    targetField.RegisterValueChangedCallback(evt =>
+                    {
+                        targetAsset = evt.newValue;
+                        excludedPaths.Clear();
+                        GitUtility.SetContextAssetPath(targetAsset != null ? AssetDatabase.GetAssetPath(targetAsset) : null);
+                        RefreshData();
+                    });
+                }
+
+                pathLabel = root.Q<Label>("pathLabel");
+                statusLabel = root.Q<Label>("statusLabel");
+
+                toggleAdded = root.Q<Toggle>("toggleAdded");
+                toggleModified = root.Q<Toggle>("toggleModified");
+                toggleDeleted = root.Q<Toggle>("toggleDeleted");
+                if (toggleAdded != null)
+                {
+                    toggleAdded.SetValueWithoutNotify(showAdded);
+                    toggleAdded.RegisterValueChangedCallback(evt => { showAdded = evt.newValue; RefreshListViews(); });
+                }
+
+                if (toggleModified != null)
+                {
+                    toggleModified.SetValueWithoutNotify(showModified);
+                    toggleModified.RegisterValueChangedCallback(evt => { showModified = evt.newValue; RefreshListViews(); });
+                }
+
+                if (toggleDeleted != null)
+                {
+                    toggleDeleted.SetValueWithoutNotify(showDeleted);
+                    toggleDeleted.RegisterValueChangedCallback(evt => { showDeleted = evt.newValue; RefreshListViews(); });
+                }
+
+                var presetChoicesUxml = new List<string>
+                {
+                    "无",
+                    "1 小时内",
+                    "5 小时内",
+                    "1 天内",
+                    "2 天内",
+                    "5 天内"
+                };
+
+                timePresetField = root.Q<DropdownField>("timePresetField");
+                if (timePresetField != null)
+                {
+                    timePresetField.choices = presetChoicesUxml;
+                    timePresetField.index = 0;
+                    timePresetField.RegisterValueChangedCallback(evt =>
+                    {
+                        switch (timePresetField.index)
+                        {
+                            case 1:
+                                ApplyQuickRange(TimeSpan.FromHours(1));
+                                break;
+                            case 2:
+                                ApplyQuickRange(TimeSpan.FromHours(5));
+                                break;
+                            case 3:
+                                ApplyQuickRange(TimeSpan.FromDays(1));
+                                break;
+                            case 4:
+                                ApplyQuickRange(TimeSpan.FromDays(2));
+                                break;
+                            case 5:
+                                ApplyQuickRange(TimeSpan.FromDays(5));
+                                break;
+                            default:
+                                startTimeInput = string.Empty;
+                                endTimeInput = string.Empty;
+                                startTimeFilter = null;
+                                endTimeFilter = null;
+                                startTimeValid = true;
+                                endTimeValid = true;
+                                if (startTimeField != null) startTimeField.value = string.Empty;
+                                if (endTimeField != null) endTimeField.value = string.Empty;
+                                RefreshListViews();
+                                break;
+                        }
+                    });
+                }
+
+                startTimeField = root.Q<TextField>("startTimeField");
+                if (startTimeField != null)
+                {
+                    startTimeField.value = startTimeInput;
+                    startTimeField.RegisterValueChangedCallback(evt =>
+                    {
+                        startTimeInput = evt.newValue;
+                        startTimeFilter = TryParseDateTime(startTimeInput, out startTimeValid);
+                        RefreshListViews();
+                    });
+                }
+
+                endTimeField = root.Q<TextField>("endTimeField");
+                if (endTimeField != null)
+                {
+                    endTimeField.value = endTimeInput;
+                    endTimeField.RegisterValueChangedCallback(evt =>
+                    {
+                        endTimeInput = evt.newValue;
+                        endTimeFilter = TryParseDateTime(endTimeInput, out endTimeValid);
+                        RefreshListViews();
+                    });
+                }
+
+                var resetTimeButtonUxml = root.Q<Button>("resetTimeButton");
+                if (resetTimeButtonUxml != null)
+                {
+                    resetTimeButtonUxml.clicked += () =>
+                    {
+                        startTimeInput = string.Empty;
+                        endTimeInput = string.Empty;
+                        startTimeFilter = null;
+                        endTimeFilter = null;
+                        startTimeValid = true;
+                        endTimeValid = true;
+                        if (startTimeField != null) startTimeField.value = string.Empty;
+                        if (endTimeField != null) endTimeField.value = string.Empty;
+                        if (timePresetField != null) timePresetField.index = 0;
+                        RefreshListViews();
+                    };
+                }
+
+                var refreshButtonUxml = root.Q<Button>("refreshButton");
+                if (refreshButtonUxml != null)
+                {
+                    refreshButtonUxml.clicked += () => { RefreshData(); };
+                }
+
+                unstagedHeaderLabel = root.Q<Label>("unstagedHeaderLabel");
+                stagedHeaderLabel = root.Q<Label>("stagedHeaderLabel");
+                unstagedScrollView = root.Q<ScrollView>("unstagedScrollView");
+                stagedScrollView = root.Q<ScrollView>("stagedScrollView");
+
+                unstagedSelectAllToggle = root.Q<Toggle>("unstagedSelectAllToggle");
+                if (unstagedSelectAllToggle != null)
+                {
+                    unstagedSelectAllToggle.RegisterValueChangedCallback(evt =>
+                    {
+                        if (evt.newValue)
+                        {
+                            selectedUnstagedPaths.Clear();
+                            foreach (var info in EnumerateFilteredAssets(false))
+                            {
+                                selectedUnstagedPaths.Add(info.AssetPath);
+                            }
+                        }
+                        else
+                        {
+                            selectedUnstagedPaths.Clear();
+                        }
+
+                        RefreshListViews();
+                    });
+                }
+
+                stagedSelectAllToggle = root.Q<Toggle>("stagedSelectAllToggle");
+                if (stagedSelectAllToggle != null)
+                {
+                    stagedSelectAllToggle.RegisterValueChangedCallback(evt =>
+                    {
+                        if (evt.newValue)
+                        {
+                            selectedStagedPaths.Clear();
+                            foreach (var info in EnumerateFilteredAssets(true))
+                            {
+                                selectedStagedPaths.Add(info.AssetPath);
+                            }
+                        }
+                        else
+                        {
+                            selectedStagedPaths.Clear();
+                        }
+
+                        RefreshListViews();
+                    });
+                }
+
+                var toStagedButtonUxml = root.Q<Button>("toStagedButton");
+                if (toStagedButtonUxml != null)
+                {
+                    toStagedButtonUxml.clicked += () => { StageSelectedUnstaged(); };
+                }
+
+                var toUnstagedButtonUxml = root.Q<Button>("toUnstagedButton");
+                if (toUnstagedButtonUxml != null)
+                {
+                    toUnstagedButtonUxml.clicked += () => { UnstageSelectedStaged(); };
+                }
+
+                commitMessageField = root.Q<TextField>("commitMessageField");
+                if (commitMessageField != null)
+                {
+                    commitMessageField.value = commitMessage;
+                    commitMessageField.RegisterValueChangedCallback(evt =>
+                    {
+                        commitMessage = evt.newValue;
+                        UpdateCommitButtonsEnabled();
+                    });
+                }
+
+                commitButton = root.Q<Button>("commitButton");
+                if (commitButton != null)
+                {
+                    commitButton.clicked += () => { PerformCommit(false); };
+                }
+
+                commitAndPushButton = root.Q<Button>("commitAndPushButton");
+                if (commitAndPushButton != null)
+                {
+                    commitAndPushButton.clicked += () => { PerformCommit(true); };
+                }
+
+                UpdateHeaderLabels();
+                UpdateCommitButtonsEnabled();
+                RefreshListViews();
+
+                return;
+            }
+
             root.style.flexDirection = FlexDirection.Column;
             root.style.flexGrow = 1f;
             // VS Code Dark 背景 #1E1E1E
@@ -892,18 +1130,6 @@ namespace OneKey.GitTools
             // 已暂存条目：在单独一行右侧放置“移出待提交”按钮
             if (stagedView)
             {
-                var buttonRow = new VisualElement();
-                buttonRow.style.flexDirection = FlexDirection.Row;
-                buttonRow.style.alignItems = Align.Center;
-
-                var flexible = new VisualElement();
-                flexible.style.flexGrow = 1f;
-                buttonRow.Add(flexible);
-
-                var unstageButton = new Button(() => { UnstageSingle(info); }) { text = "移出待提交" };
-                buttonRow.Add(unstageButton);
-
-                container.Add(buttonRow);
             }
 
             return container;
@@ -1115,7 +1341,7 @@ namespace OneKey.GitTools
                 EditorGUILayout.LabelField("类型", info.ChangeType.ToDisplayName(), GUILayout.Width(120));
                 var displayTime = info.WorkingTreeTime;
                 var timeText = displayTime.HasValue ? displayTime.Value.ToString("yyyy-MM-dd HH:mm") : "未提交";
-                EditorGUILayout.LabelField("最后记录", timeText);
+                EditorGUILayout.LabelField("本地修改时间", timeText);
             }
 
             using (new EditorGUILayout.HorizontalScope())
@@ -1161,7 +1387,7 @@ namespace OneKey.GitTools
                 EditorGUILayout.LabelField("类型", info.ChangeType.ToDisplayName(), GUILayout.Width(120));
                 var displayTime = info.WorkingTreeTime;
                 var timeText = displayTime.HasValue ? displayTime.Value.ToString("yyyy-MM-dd HH:mm") : "未提交";
-                EditorGUILayout.LabelField("最后记录", timeText);
+                EditorGUILayout.LabelField("本地修改时间", timeText);
             }
 
             using (new EditorGUILayout.HorizontalScope())
@@ -1187,11 +1413,6 @@ namespace OneKey.GitTools
                 }
 
                 GUILayout.FlexibleSpace();
-
-                if (GUILayout.Button("移出待提交", GUILayout.Width(90)))
-                {
-                    UnstageSingle(info);
-                }
             }
 
             EditorGUILayout.EndVertical();

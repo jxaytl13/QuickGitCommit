@@ -262,7 +262,7 @@ namespace OneKey.GitTools
 
         internal static DateTime? GetLastKnownChangeTime(string relativePath)
         {
-            return GetLastCommitTime(relativePath);
+            return GetWorkingTreeTimestamp(relativePath, GitChangeType.Unknown);
         }
 
         private static DateTime? GetWorkingTreeTimestamp(string unityPath, GitChangeType type)
