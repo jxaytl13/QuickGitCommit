@@ -970,6 +970,37 @@ namespace OneKey.GitTools
             {
                 stagedScrollView.Add(CreateAssetRow(info, true));
             }
+
+            if (unstaged.Count == 0 && staged.Count == 0)
+            {
+                var message = string.IsNullOrEmpty(statusMessage)
+                    ? "Git未检测到与该资源相关的变更"
+                    : statusMessage;
+                AddEmptyPlaceholderLabel(unstagedScrollView, message);
+            }
+        }
+
+        private void AddEmptyPlaceholderLabel(ScrollView target, string message)
+        {
+            if (target == null)
+            {
+                return;
+            }
+
+            var container = new VisualElement();
+            container.style.flexGrow = 1f;
+            container.style.flexDirection = FlexDirection.Column;
+            container.style.justifyContent = Justify.Center;
+
+            var label = new Label(message);
+            label.style.unityTextAlign = TextAnchor.MiddleCenter;
+            label.style.color = new Color(1f, 1f, 1f, 0.6f);
+            label.style.alignSelf = Align.Center;
+            label.style.marginTop = 0;
+            label.style.marginBottom = 0;
+
+            container.Add(label);
+            target.Add(container);
         }
 
         private VisualElement CreateAssetRow(GitAssetInfo info, bool stagedView)

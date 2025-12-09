@@ -80,6 +80,7 @@ namespace OneKey.GitTools
         private static string cachedUnityProjectFolder;
         private static string contextAssetAbsolutePath;
         private static bool gitRootNotFoundLogged;
+        private static bool gitRevParseWarningLogged;
 
         internal static string ProjectRoot
         {
@@ -90,11 +91,7 @@ namespace OneKey.GitTools
                     cachedProjectRoot = LocateGitRoot();
                     if (string.IsNullOrEmpty(cachedProjectRoot))
                     {
-                        if (!gitRootNotFoundLogged)
-                        {
-                            Debug.LogWarning("GitQuickCommit: 未能找到包含 .git 的根目录，请确认工程处于 Git 仓库内。");
-                            gitRootNotFoundLogged = true;
-                        }
+                        gitRootNotFoundLogged = true;
                     }
                     else
                     {
@@ -494,9 +491,14 @@ namespace OneKey.GitTools
                         return true;
                     }
                 }
-                else if (!string.IsNullOrEmpty(stderr))
+                else if (!string.IsNullOrEmpty(stderr) && !gitRevParseWarningLogged)
                 {
-                    Debug.LogWarning($"GitQuickCommit: rev-parse 失败: {stderr}");
+                    if (stderr.IndexOf("not a git repository", StringComparison.OrdinalIgnoreCase) < 0)
+                    {
+                        Debug.LogWarning($"GitQuickCommit: rev-parse 失败: {stderr}");
+                    }
+
+                    gitRevParseWarningLogged = true;
                 }
             }
             catch (Exception ex)
