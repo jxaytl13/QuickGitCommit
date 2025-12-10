@@ -72,12 +72,19 @@
             </ui:VisualElement>
         </ui:VisualElement>
         <ui:VisualElement name="commitBox" class="card commit-box" style="align-self: stretch; flex-grow: 0; flex-direction: column; border-left-color: rgba(0, 0, 0, 0); border-right-color: rgba(0, 0, 0, 0); border-top-color: rgba(0, 0, 0, 0); border-bottom-color: rgba(0, 0, 0, 0);">
+            <ui:Label name="repositoryStatusLabel" class="repo-status-label" enable-rich-text="true" />
             <ui:Label name="commitTitle" text="提交" enable-rich-text="true" class="title" style="flex-grow: 0; flex-shrink: 1; align-items: stretch; width: auto; height: auto; margin-top: 10px;" />
-            <ui:TextField name="commitMessageField" label="提交说明" style="flex-grow: 1; align-self: flex-start; align-items: center; flex-shrink: 1; height: auto;" />
+            <ui:VisualElement name="commitMessageRow" class="row commit-message-row" style="flex-grow: 0; align-items: flex-end;">
+                <ui:TextField name="commitMessageField" label="提交说明" style="flex-grow: 1; align-self: flex-start; align-items: center; flex-shrink: 1; height: auto;" />
+                <ui:Button name="historyButton" text="记录" class="history-button" />
+            </ui:VisualElement>
             <ui:VisualElement name="commitRow" class="row commit-row" style="flex-direction: row; align-items: flex-end; justify-content: space-between; align-self: stretch; flex-grow: 0; border-left-color: rgba(0, 0, 0, 0); border-right-color: rgba(0, 0, 0, 0); border-top-color: rgba(0, 0, 0, 0); border-bottom-color: rgba(0, 0, 0, 0); height: auto;">
                 <ui:Button name="commitButton" text="提交到本地" class="commit-local-button" style="flex-grow: 1;" />
                 <ui:Button name="commitAndPushButton" text="提交并推送" class="commit-push-button" style="flex-grow: 1;" />
             </ui:VisualElement>
+        </ui:VisualElement>
+        <ui:VisualElement name="historyDropdown" class="history-dropdown" style="display: none; position: relative; left: auto; top: auto; right: auto; bottom: auto; flex-grow: 1; align-self: stretch;">
+            <ui:ListView name="historyListView" style="flex-grow: 1; align-self: stretch;" />
         </ui:VisualElement>
     </ui:VisualElement>
 </ui:UXML>

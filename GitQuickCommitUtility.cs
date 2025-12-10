@@ -74,6 +74,20 @@ namespace OneKey.GitTools
         }
     }
 
+    internal readonly struct GitRepositoryStatusInfo
+    {
+        public readonly int StagedCount;
+        public readonly int UnstagedCount;
+
+        public GitRepositoryStatusInfo(int stagedCount, int unstagedCount)
+        {
+            StagedCount = stagedCount;
+            UnstagedCount = unstagedCount;
+        }
+
+        public bool HasChanges => StagedCount > 0 || UnstagedCount > 0;
+    }
+
     internal static class GitUtility
     {
         private static string cachedProjectRoot;
@@ -222,7 +236,7 @@ namespace OneKey.GitTools
 
             if (AssetDatabase.IsValidFolder(assetPath))
             {
-                dependencySet.Add(assetPath);
+                AddPathAndMeta(dependencySet, assetPath);
             }
             else
             {
@@ -231,11 +245,11 @@ namespace OneKey.GitTools
                     var normalized = NormalizeAssetPath(dep);
                     if (!string.IsNullOrEmpty(normalized))
                     {
-                        dependencySet.Add(normalized);
+                        AddPathAndMeta(dependencySet, normalized);
                     }
                 }
 
-                dependencySet.Add(assetPath);
+                AddPathAndMeta(dependencySet, assetPath);
             }
 
             foreach (var entry in allChanges)
@@ -770,6 +784,46 @@ namespace OneKey.GitTools
 
             var projectFolder = GetUnityProjectFolder();
             return Path.GetFullPath(Path.Combine(projectFolder, relativePath));
+        }
+
+        private static void AddPathAndMeta(HashSet<string> set, string path)
+        {
+            if (set == null || string.IsNullOrEmpty(path))
+            {
+                return;
+            }
+
+            set.Add(path);
+            if (!path.EndsWith(".meta", StringComparison.OrdinalIgnoreCase))
+            {
+                set.Add($"{path}.meta");
+            }
+        }
+
+        internal static GitRepositoryStatusInfo GetRepositoryStatusInfo()
+        {
+            var changes = GetWorkingTreeChanges();
+            if (changes == null || changes.Count == 0)
+            {
+                return new GitRepositoryStatusInfo(0, 0);
+            }
+
+            var staged = 0;
+            var unstaged = 0;
+            foreach (var entry in changes)
+            {
+                if (entry.IsStaged)
+                {
+                    staged++;
+                }
+
+                if (entry.IsUnstaged)
+                {
+                    unstaged++;
+                }
+            }
+
+            return new GitRepositoryStatusInfo(staged, unstaged);
         }
     }
 }

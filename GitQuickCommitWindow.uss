@@ -78,6 +78,15 @@
 .arrow-button {
     height: 22px;
     margin-bottom: 6px;
+    transition: background-color 0.1s ease-in-out;
+}
+
+.arrow-button:hover {
+    background-color: #3a3a3a;
+}
+
+.arrow-button:active {
+    background-color: #2a2a2a;
 }
 
 .commit-box {
@@ -115,6 +124,68 @@
     flex-grow: 1;
     height: 22px;
     background-color: #336fbf;
+}
+
+.commit-message-row {
+    margin-top: 4px;
+}
+
+.history-button {
+    width: 60px;
+    margin-left: 6px;
+    height: 22px;
+    flex-shrink: 0;
+}
+
+.history-dropdown {
+    position: absolute;
+    z-index: 200;
+    flex-direction: column;
+    margin-top: 4px;
+    border-width: 1px;
+    border-color: #3c3c3c;
+    background-color: #1b1b1b;
+    padding: 4px;
+    max-height: 160px;
+}
+
+.history-entry-label {
+    padding: 2px 4px;
+    color: #f0f0f0;
+}
+
+.history-entry-label:hover {
+    background-color: #2c2c2c;
+}
+
+.history-list {
+    flex-direction: column;
+    margin-top: 4px;
+    padding: 4px;
+    background-color: #1b1b1b;
+    border-top-width: 1px;
+    border-bottom-width: 1px;
+    border-left-width: 1px;
+    border-right-width: 1px;
+    border-top-color: #3c3c3c;
+    border-bottom-color: #3c3c3c;
+    border-left-color: #3c3c3c;
+    border-right-color: #3c3c3c;
+    max-height: 140px;
+}
+
+.history-entry-button {
+    justify-content: flex-start;
+    white-space: normal;
+    text-align: left;
+}
+
+.repo-status-label {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.75);
+    margin-left: 6px;
+    margin-right: 6px;
+    margin-bottom: 4px;
 }
 
 .change-added-label {
