@@ -1,7 +1,8 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -13,6 +14,7 @@ namespace OneKey.GitTools
     {
         private const string WindowTitle = "\u5feb\u6377Git\u63d0\u4ea4";
         private const string CommitHistoryFileName = "QuickGitCommitHistory.json";
+        private const string LayoutAssetName = "GitQuickCommitWindow.uxml";
         private const int MaxCommitHistoryEntries = 20;
         private const string AddedColorHex = "#80D980";
         private const string ModifiedColorHex = "#F2BF66";
@@ -32,11 +34,43 @@ namespace OneKey.GitTools
         private bool selectedTargetIsFolder;
         private string targetFolderPrefix;
 
+        private Task<List<GitChangeEntry>> refreshTask;
+        private bool refreshInProgress;
+        private bool refreshQueued;
+        private List<string> refreshInfoMessages;
+
+        private enum GitOperationKind
+        {
+            None,
+            Stage,
+            Unstage,
+            Commit,
+            CommitAndPush
+        }
+
+        private readonly struct GitOperationResult
+        {
+            public readonly bool Success;
+            public readonly string Summary;
+            public readonly bool CommitSucceeded;
+            public readonly string CommittedMessage;
+
+            public GitOperationResult(bool success, string summary, bool commitSucceeded = false, string committedMessage = null)
+            {
+                Success = success;
+                Summary = summary;
+                CommitSucceeded = commitSucceeded;
+                CommittedMessage = committedMessage;
+            }
+        }
+
+        private Task<GitOperationResult> gitOperationTask;
+        private bool gitOperationInProgress;
+        private GitOperationKind gitOperationKind;
 
         // 选择状态：左侧未暂存 / 右侧已暂存
         private readonly HashSet<string> selectedUnstagedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> selectedStagedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
         private bool showAdded = true;
         private bool showModified = true;
         private bool showDeleted = true;
@@ -46,6 +80,7 @@ namespace OneKey.GitTools
         private DateTime? endTimeFilter;
         private bool startTimeValid = true;
         private bool endTimeValid = true;
+        private string searchQuery = string.Empty;
         private string statusMessage;
         private string commitMessage = string.Empty;
         private string repositoryStatusMessage = "\u6b63\u5728\u68c0\u6d4b Git \u72b6\u6001...";
@@ -62,6 +97,7 @@ namespace OneKey.GitTools
         private TextField startTimeField;
         private TextField endTimeField;
         private DropdownField timePresetField;
+        private TextField searchField;
         private Label unstagedHeaderLabel;
         private Label stagedHeaderLabel;
         private ScrollView unstagedScrollView;
@@ -70,6 +106,11 @@ namespace OneKey.GitTools
         private Button commitButton;
         private Button commitAndPushButton;
         private Button historyButton;
+        private Button resetTimeButton;
+        private Button refreshButton;
+        private Button toStagedButton;
+        private Button toUnstagedButton;
+        private Button clearExcludeButton;
         private VisualElement historyDropdown;
         private ListView historyListView;
         private Label repositoryStatusLabel;
@@ -144,21 +185,21 @@ namespace OneKey.GitTools
                 return null;
             }
 
-            // 1. ????????????????????
+            // 1. 直接获取 GameObject 对应的资源路径
             var directPath = AssetDatabase.GetAssetPath(go);
             if (!string.IsNullOrEmpty(directPath))
             {
                 return AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(directPath);
             }
 
-            // 2. Prefab ??????? Prefab ????
+            // 2. Prefab 实例 -> Prefab 资源
             var prefabPath = PrefabUtility.GetPrefabAssetPathOfNearestInstanceRoot(go);
             if (!string.IsNullOrEmpty(prefabPath))
             {
                 return AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(prefabPath);
             }
 
-            // 3. ????????????????
+            // 3. 场景对象 -> 场景资源
             var scenePath = go.scene.path;
             if (!string.IsNullOrEmpty(scenePath))
             {
@@ -182,6 +223,18 @@ namespace OneKey.GitTools
             CreateGUI();
         }
 
+        private void OnDisable()
+        {
+            refreshInProgress = false;
+            refreshQueued = false;
+            refreshInfoMessages = null;
+            refreshTask = null;
+
+            gitOperationInProgress = false;
+            gitOperationKind = GitOperationKind.None;
+            gitOperationTask = null;
+        }
+
         private void Update()
         {
             if (notificationEndTime > 0 && EditorApplication.timeSinceStartup >= notificationEndTime)
@@ -189,6 +242,9 @@ namespace OneKey.GitTools
                 RemoveNotification();
                 notificationEndTime = 0;
             }
+
+            PollRefreshTask();
+            PollGitOperationTask();
         }
 
         private void OnFocus()
@@ -197,7 +253,7 @@ namespace OneKey.GitTools
 
         private void OnGUI()
         {
-            // 浣跨敤 UI Toolkit锛屼笉鍐嶇粯鍒?IMGUI
+            // UI 完全使用 UI Toolkit 构建，如需 IMGUI 可在此扩展。
         }
 
         private void ShowTempNotification(string message, float seconds = 2f)
@@ -213,24 +269,16 @@ namespace OneKey.GitTools
 
         private void CreateGUI()
         {
+            historyDropdownVisible = false;
+
             var root = rootVisualElement;
             root.Clear();
-            var assetFolder = GetAssetFolderPath();
-            var visualTreePath = $"{assetFolder}/GitQuickCommitWindow.uxml";
-            var styleSheetPath = $"{assetFolder}/GitQuickCommitWindow.uss";
-            var visualTree = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>(visualTreePath);
-            if (visualTree == null)
+
+            if (!BuildLayoutFromUxml(root))
             {
-                root.Add(new Label($"无法加载 UI：{visualTreePath}"));
                 return;
             }
-            visualTree.CloneTree(root);
-            var styleSheet = AssetDatabase.LoadAssetAtPath<StyleSheet>(styleSheetPath);
-            if (styleSheet != null)
-            {
-                root.styleSheets.Add(styleSheet);
-            }
-            targetField = root.Q<ObjectField>("targetField");
+
             if (targetField != null)
             {
                 targetField.objectType = typeof(UnityEngine.Object);
@@ -244,21 +292,28 @@ namespace OneKey.GitTools
                     RefreshData();
                 });
             }
-            pathLabel = root.Q<Label>("pathLabel");
-            statusLabel = root.Q<Label>("statusLabel");
-            toggleAdded = root.Q<Toggle>("toggleAdded");
-            toggleModified = root.Q<Toggle>("toggleModified");
-            toggleDeleted = root.Q<Toggle>("toggleDeleted");
+
+            if (clearExcludeButton != null)
+            {
+                clearExcludeButton.clicked += () =>
+                {
+                    excludedPaths.Clear();
+                    RefreshListViews();
+                };
+            }
+
             if (toggleAdded != null)
             {
                 toggleAdded.SetValueWithoutNotify(showAdded);
                 toggleAdded.RegisterValueChangedCallback(evt => { showAdded = evt.newValue; RefreshListViews(); });
             }
+
             if (toggleModified != null)
             {
                 toggleModified.SetValueWithoutNotify(showModified);
                 toggleModified.RegisterValueChangedCallback(evt => { showModified = evt.newValue; RefreshListViews(); });
             }
+
             if (toggleDeleted != null)
             {
                 toggleDeleted.SetValueWithoutNotify(showDeleted);
@@ -266,14 +321,13 @@ namespace OneKey.GitTools
             }
             var presetChoices = new List<string>
             {
-                "无",
-                "1 小时内",
-                "5 小时内",
-                "1 天内",
-                "2 天内",
-                "5 天内"
+                "\u4e0d\u9650",
+                "1 \u5c0f\u65f6\u5185",
+                "5 \u5c0f\u65f6\u5185",
+                "1 \u5929\u5185",
+                "2 \u5929\u5185",
+                "5 \u5929\u5185"
             };
-            timePresetField = root.Q<DropdownField>("timePresetField");
             if (timePresetField != null)
             {
                 timePresetField.choices = presetChoices;
@@ -311,7 +365,6 @@ namespace OneKey.GitTools
                     }
                 });
             }
-            startTimeField = root.Q<TextField>("startTimeField");
             if (startTimeField != null)
             {
                 startTimeField.value = startTimeInput;
@@ -322,7 +375,6 @@ namespace OneKey.GitTools
                     RefreshListViews();
                 });
             }
-            endTimeField = root.Q<TextField>("endTimeField");
             if (endTimeField != null)
             {
                 endTimeField.value = endTimeInput;
@@ -333,7 +385,6 @@ namespace OneKey.GitTools
                     RefreshListViews();
                 });
             }
-            var resetTimeButton = root.Q<Button>("resetTimeButton");
             if (resetTimeButton != null)
             {
                 resetTimeButton.clicked += () =>
@@ -350,16 +401,19 @@ namespace OneKey.GitTools
                     RefreshListViews();
                 };
             }
-            var refreshButton = root.Q<Button>("refreshButton");
+            if (searchField != null)
+            {
+                searchField.value = searchQuery;
+                searchField.RegisterValueChangedCallback(evt =>
+                {
+                    searchQuery = evt.newValue ?? string.Empty;
+                    RefreshListViews();
+                });
+            }
             if (refreshButton != null)
             {
                 refreshButton.clicked += () => { RefreshData(); };
             }
-            unstagedHeaderLabel = root.Q<Label>("unstagedHeaderLabel");
-            stagedHeaderLabel = root.Q<Label>("stagedHeaderLabel");
-            unstagedScrollView = root.Q<ScrollView>("unstagedScrollView");
-            stagedScrollView = root.Q<ScrollView>("stagedScrollView");
-            unstagedSelectAllToggle = root.Q<Toggle>("unstagedSelectAllToggle");
             if (unstagedSelectAllToggle != null)
             {
                 unstagedSelectAllToggle.RegisterValueChangedCallback(evt =>
@@ -379,7 +433,6 @@ namespace OneKey.GitTools
                     RefreshListViews();
                 });
             }
-            stagedSelectAllToggle = root.Q<Toggle>("stagedSelectAllToggle");
             if (stagedSelectAllToggle != null)
             {
                 stagedSelectAllToggle.RegisterValueChangedCallback(evt =>
@@ -399,17 +452,14 @@ namespace OneKey.GitTools
                     RefreshListViews();
                 });
             }
-            var toStagedButton = root.Q<Button>("toStagedButton");
             if (toStagedButton != null)
             {
                 toStagedButton.clicked += () => { StageSelectedUnstaged(); };
             }
-            var toUnstagedButton = root.Q<Button>("toUnstagedButton");
             if (toUnstagedButton != null)
             {
                 toUnstagedButton.clicked += () => { UnstageSelectedStaged(); };
             }
-            commitMessageField = root.Q<TextField>("commitMessageField");
             if (commitMessageField != null)
             {
                 commitMessageField.value = commitMessage;
@@ -419,25 +469,16 @@ namespace OneKey.GitTools
                     UpdateCommitButtonsEnabled();
                 });
             }
-            historyButton = root.Q<Button>("historyButton");
             if (historyButton != null)
             {
                 historyButton.clicked += ToggleHistoryDropdown;
             }
-            historyDropdown = root.Q<VisualElement>("historyDropdown");
-            if (historyDropdown != null)
-            {
-                historyDropdown.style.display = DisplayStyle.None;
-            }
-            historyListView = root.Q<ListView>("historyListView");
             if (historyListView != null)
             {
                 historyListView.selectionType = SelectionType.Single;
                 historyListView.makeItem = () =>
                 {
-                    var label = new Label();
-                    label.AddToClassList("history-entry-label");
-                    return label;
+                    return new Label();
                 };
                 historyListView.bindItem = (element, i) =>
                 {
@@ -449,26 +490,16 @@ namespace OneKey.GitTools
                 };
                 historyListView.onSelectionChange += OnHistoryListSelectionChanged;
             }
-            root.RegisterCallback<GeometryChangedEvent>(_ =>
-            {
-                if (historyDropdownVisible)
-                {
-                    PositionHistoryDropdown();
-                }
-            });
             root.RegisterCallback<MouseDownEvent>(OnRootMouseDown, TrickleDown.TrickleDown);
             UpdateHistoryButtonState();
-            commitButton = root.Q<Button>("commitButton");
             if (commitButton != null)
             {
                 commitButton.clicked += () => { PerformCommit(false); };
             }
-            commitAndPushButton = root.Q<Button>("commitAndPushButton");
             if (commitAndPushButton != null)
             {
                 commitAndPushButton.clicked += () => { PerformCommit(true); };
             }
-            repositoryStatusLabel = root.Q<Label>("repositoryStatusLabel");
             if (repositoryStatusLabel != null)
             {
                 repositoryStatusLabel.text = repositoryStatusMessage;
@@ -477,12 +508,238 @@ namespace OneKey.GitTools
             UpdateCommitButtonsEnabled();
             RefreshListViews();
         }
+
+        private void PollRefreshTask()
+        {
+            if (refreshTask == null || !refreshTask.IsCompleted)
+            {
+                return;
+            }
+
+            var completedTask = refreshTask;
+            var completedInfoMessages = refreshInfoMessages ?? new List<string>();
+            refreshTask = null;
+            refreshInfoMessages = null;
+
+            refreshInProgress = false;
+            UpdateActionButtonsEnabled();
+            UpdateCommitButtonsEnabled();
+
+            if (refreshQueued)
+            {
+                refreshQueued = false;
+                RefreshData();
+                return;
+            }
+
+            if (completedTask.IsCanceled)
+            {
+                statusMessage = "刷新已取消。";
+                UpdateHeaderLabels();
+                UpdateCommitButtonsEnabled();
+                Repaint();
+                return;
+            }
+
+            if (completedTask.IsFaulted)
+            {
+                var error = completedTask.Exception?.GetBaseException().Message ?? "未知错误";
+                statusMessage = $"刷新失败：{error}";
+                UpdateHeaderLabels();
+                UpdateCommitButtonsEnabled();
+                Repaint();
+                return;
+            }
+
+            ApplyGitChanges(completedTask.Result ?? new List<GitChangeEntry>(), completedInfoMessages);
+        }
+
+        private void PollGitOperationTask()
+        {
+            if (gitOperationTask == null || !gitOperationTask.IsCompleted)
+            {
+                return;
+            }
+
+            var completedTask = gitOperationTask;
+            var completedKind = gitOperationKind;
+
+            gitOperationTask = null;
+            gitOperationKind = GitOperationKind.None;
+
+            gitOperationInProgress = false;
+            UpdateActionButtonsEnabled();
+            UpdateCommitButtonsEnabled();
+
+            if (refreshQueued)
+            {
+                refreshQueued = false;
+                RefreshData();
+                return;
+            }
+
+            if (completedTask.IsCanceled)
+            {
+                ShowTempNotification("操作已取消。");
+                return;
+            }
+
+            if (completedTask.IsFaulted)
+            {
+                var error = completedTask.Exception?.GetBaseException().Message ?? "未知错误";
+                ShowTempNotification($"操作失败：{error}");
+                return;
+            }
+
+            var result = completedTask.Result;
+            if (completedKind == GitOperationKind.Commit || completedKind == GitOperationKind.CommitAndPush)
+            {
+                EditorUtility.DisplayDialog("提交", string.IsNullOrEmpty(result.Summary) ? "操作完成。" : result.Summary, "确定");
+
+                if (result.CommitSucceeded)
+                {
+                    if (!string.IsNullOrWhiteSpace(result.CommittedMessage))
+                    {
+                        AddCommitMessageToHistory(result.CommittedMessage);
+                    }
+
+                    commitMessage = string.Empty;
+                    if (commitMessageField != null)
+                    {
+                        commitMessageField.value = string.Empty;
+                    }
+
+                    HideHistoryDropdown();
+                }
+            }
+            else if (!string.IsNullOrEmpty(result.Summary))
+            {
+                ShowTempNotification(result.Summary);
+            }
+
+            if (completedKind == GitOperationKind.Stage)
+            {
+                selectedUnstagedPaths.Clear();
+            }
+            else if (completedKind == GitOperationKind.Unstage)
+            {
+                selectedStagedPaths.Clear();
+            }
+
+            RefreshData();
+        }
+
+        private bool BuildLayoutFromUxml(VisualElement root)
+        {
+            var uxmlPath = Path.Combine(GetAssetFolderPath(), LayoutAssetName).Replace("\\", "/");
+            var layoutAsset = LoadAssetAtPathOrByName<VisualTreeAsset>(uxmlPath, Path.GetFileNameWithoutExtension(LayoutAssetName));
+            if (layoutAsset == null)
+            {
+                ShowLayoutLoadError(root, $"无法加载布局文件: {uxmlPath}\n请确认该文件已导入为 VisualTreeAsset。");
+                return false;
+            }
+
+            var layoutInstance = layoutAsset.CloneTree();
+            root.Add(layoutInstance);
+
+            CacheUIElements(root);
+            return true;
+        }
+
+        private static T LoadAssetAtPathOrByName<T>(string assetPath, string nameWithoutExtension) where T : UnityEngine.Object
+        {
+            var asset = AssetDatabase.LoadAssetAtPath<T>(assetPath);
+            if (asset != null)
+            {
+                return asset;
+            }
+
+            var typeName = typeof(T).Name;
+            var guids = AssetDatabase.FindAssets($"{nameWithoutExtension} t:{typeName}");
+            if (guids == null || guids.Length == 0)
+            {
+                return null;
+            }
+
+            foreach (var guid in guids)
+            {
+                var candidatePath = AssetDatabase.GUIDToAssetPath(guid);
+                if (string.IsNullOrEmpty(candidatePath))
+                {
+                    continue;
+                }
+
+                var candidate = AssetDatabase.LoadAssetAtPath<T>(candidatePath);
+                if (candidate != null)
+                {
+                    return candidate;
+                }
+            }
+
+            return null;
+        }
+
+        private static void ShowLayoutLoadError(VisualElement root, string message)
+        {
+            if (root == null)
+            {
+                return;
+            }
+
+            var label = new Label(message);
+            label.style.whiteSpace = WhiteSpace.Normal;
+            label.style.unityTextAlign = TextAnchor.UpperLeft;
+            label.style.paddingLeft = 8;
+            label.style.paddingRight = 8;
+            label.style.paddingTop = 8;
+            label.style.paddingBottom = 8;
+            root.Add(label);
+        }
+
+        private void CacheUIElements(VisualElement root)
+        {
+            targetField = root.Q<ObjectField>("targetField");
+            pathLabel = root.Q<Label>("pathLabel");
+            statusLabel = root.Q<Label>("statusLabel");
+            toggleAdded = root.Q<Toggle>("toggleAdded");
+            toggleModified = root.Q<Toggle>("toggleModified");
+            toggleDeleted = root.Q<Toggle>("toggleDeleted");
+            startTimeField = root.Q<TextField>("startTimeField");
+            endTimeField = root.Q<TextField>("endTimeField");
+            timePresetField = root.Q<DropdownField>("timePresetField");
+            searchField = root.Q<TextField>("searchField");
+            unstagedHeaderLabel = root.Q<Label>("unstagedHeaderLabel");
+            stagedHeaderLabel = root.Q<Label>("stagedHeaderLabel");
+            unstagedScrollView = root.Q<ScrollView>("unstagedScrollView");
+            stagedScrollView = root.Q<ScrollView>("stagedScrollView");
+            commitMessageField = root.Q<TextField>("commitMessageField");
+            commitButton = root.Q<Button>("commitButton");
+            commitAndPushButton = root.Q<Button>("commitAndPushButton");
+            historyButton = root.Q<Button>("historyButton");
+            resetTimeButton = root.Q<Button>("resetTimeButton");
+            refreshButton = root.Q<Button>("refreshButton");
+            toStagedButton = root.Q<Button>("toStagedButton");
+            toUnstagedButton = root.Q<Button>("toUnstagedButton");
+            clearExcludeButton = root.Q<Button>("clearExcludeButton");
+            historyDropdown = root.Q<VisualElement>("historyDropdown");
+            historyListView = root.Q<ListView>("historyListView");
+            repositoryStatusLabel = root.Q<Label>("repositoryStatusLabel");
+            unstagedSelectAllToggle = root.Q<Toggle>("unstagedSelectAllToggle");
+            stagedSelectAllToggle = root.Q<Toggle>("stagedSelectAllToggle");
+        }
+
         private void StageSelectedUnstaged()
         {
             var paths = selectedUnstagedPaths.ToList();
             if (paths.Count == 0)
             {
                 ShowTempNotification("请先在左侧勾选要发送的变更。");
+                return;
+            }
+
+            if (refreshInProgress || gitOperationInProgress)
+            {
+                ShowTempNotification("正在执行其他操作，请稍候。");
                 return;
             }
 
@@ -496,21 +753,44 @@ namespace OneKey.GitTools
                 return;
             }
 
-            var success = GitUtility.StageAssets(toStage, out var summary);
-            if (success)
+            var gitRoot = GitUtility.ProjectRoot;
+            _ = GitUtility.UnityProjectFolder;
+            if (string.IsNullOrEmpty(gitRoot))
             {
-                selectedUnstagedPaths.Clear();
-                RefreshData();
-                ShowTempNotification(string.IsNullOrEmpty(summary)
-                    ? $"已发送 {toStage.Count} 个变更至待提交。"
-                    : summary);
+                ShowTempNotification("未找到 Git 根目录。");
+                return;
             }
-            else
+
+            var requests = new List<GitUtility.GitStageRequest>(toStage.Count);
+            foreach (var info in toStage)
             {
-                ShowTempNotification(string.IsNullOrEmpty(summary)
-                    ? "发送至待提交失败，请检查 Git 输出。"
-                    : summary);
+                if (GitUtility.TryGetGitRelativePath(info.AssetPath, out var gitPath))
+                {
+                    requests.Add(new GitUtility.GitStageRequest(gitPath, info.ChangeType));
+                }
             }
+
+            if (requests.Count == 0)
+            {
+                ShowTempNotification("当前没有可发送的变更。");
+                return;
+            }
+
+            gitOperationInProgress = true;
+            gitOperationKind = GitOperationKind.Stage;
+            UpdateActionButtonsEnabled();
+            UpdateCommitButtonsEnabled();
+
+            statusMessage = "正在发送至待提交...";
+            UpdateHeaderLabels();
+            Repaint();
+
+            gitOperationTask = Task.Run(() =>
+            {
+                var success = GitUtility.StageGitPaths(gitRoot, requests, out var summary);
+                return new GitOperationResult(success, summary);
+            });
+            gitOperationTask.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
         }
 
         private void UnstageSelectedStaged()
@@ -519,6 +799,12 @@ namespace OneKey.GitTools
             if (paths.Count == 0)
             {
                 ShowTempNotification("请先在右侧勾选要移出的变更。");
+                return;
+            }
+
+            if (refreshInProgress || gitOperationInProgress)
+            {
+                ShowTempNotification("正在执行其他操作，请稍候。");
                 return;
             }
 
@@ -532,21 +818,44 @@ namespace OneKey.GitTools
                 return;
             }
 
-            var success = GitUtility.UnstageAssets(toUnstage, out var summary);
-            if (success)
+            var gitRoot = GitUtility.ProjectRoot;
+            _ = GitUtility.UnityProjectFolder;
+            if (string.IsNullOrEmpty(gitRoot))
             {
-                selectedStagedPaths.Clear();
-                RefreshData();
-                ShowTempNotification(string.IsNullOrEmpty(summary)
-                    ? $"已从待提交移出 {toUnstage.Count} 个变更。"
-                    : summary);
+                ShowTempNotification("未找到 Git 根目录。");
+                return;
             }
-            else
+
+            var requests = new List<string>(toUnstage.Count);
+            foreach (var info in toUnstage)
             {
-                ShowTempNotification(string.IsNullOrEmpty(summary)
-                    ? "移出待提交失败，请检查 Git 输出。"
-                    : summary);
+                if (GitUtility.TryGetGitRelativePath(info.AssetPath, out var gitPath))
+                {
+                    requests.Add(gitPath);
+                }
             }
+
+            if (requests.Count == 0)
+            {
+                ShowTempNotification("当前没有可移出的待提交项。");
+                return;
+            }
+
+            gitOperationInProgress = true;
+            gitOperationKind = GitOperationKind.Unstage;
+            UpdateActionButtonsEnabled();
+            UpdateCommitButtonsEnabled();
+
+            statusMessage = "正在从待提交移出...";
+            UpdateHeaderLabels();
+            Repaint();
+
+            gitOperationTask = Task.Run(() =>
+            {
+                var success = GitUtility.UnstageGitPaths(gitRoot, requests, out var summary);
+                return new GitOperationResult(success, summary);
+            });
+            gitOperationTask.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
         }
 
         private IEnumerable<GitAssetInfo> EnumerateFilteredAssets()
@@ -593,8 +902,35 @@ namespace OneKey.GitTools
                     continue;
                 }
 
+                if (!IsMatchSearchQuery(info))
+                {
+                    continue;
+                }
+
                 yield return info;
             }
+        }
+
+        private bool IsMatchSearchQuery(GitAssetInfo info)
+        {
+            if (info == null)
+            {
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(searchQuery))
+            {
+                return true;
+            }
+
+            var query = searchQuery.Trim();
+            if (query.Length == 0)
+            {
+                return true;
+            }
+
+            var name = info.FileName ?? string.Empty;
+            return name.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private bool IsChangeTypeVisible(GitChangeType type)
@@ -636,6 +972,16 @@ namespace OneKey.GitTools
 
         private void RefreshData()
         {
+            if (refreshInProgress || gitOperationInProgress)
+            {
+                refreshQueued = true;
+                return;
+            }
+
+            refreshInProgress = true;
+            UpdateActionButtonsEnabled();
+            UpdateCommitButtonsEnabled();
+
             assetInfos.Clear();
             statusMessage = string.Empty;
             selectedUnstagedPaths.Clear();
@@ -651,7 +997,7 @@ namespace OneKey.GitTools
             {
                 targetAssetPath = string.Empty;
                 GitUtility.SetContextAssetPath(null);
-                infoMessages.Add("未选择资源，将显示全部变更。");
+                infoMessages.Add("\u672a\u9009\u62e9\u8d44\u6e90\uff0c\u5c06\u663e\u793a\u5168\u90e8\u53d8\u66f4\u3002");
             }
             else
             {
@@ -659,20 +1005,51 @@ namespace OneKey.GitTools
                 GitUtility.SetContextAssetPath(targetAssetPath);
                 if (string.IsNullOrEmpty(targetAssetPath))
                 {
-                    infoMessages.Add("无法解析资源路径。");
-                }
-                else
-                {
-                    UpdateTargetSelectionInfo();
+                    infoMessages.Add("\u65e0\u6cd5\u89e3\u6790\u8d44\u6e90\u8def\u5f84\u3002");
                 }
             }
 
-            gitChanges = GitUtility.GetWorkingTreeChanges() ?? new List<GitChangeEntry>();
+            var gitRoot = GitUtility.ProjectRoot;
+            if (string.IsNullOrEmpty(gitRoot))
+            {
+                refreshInProgress = false;
+                UpdateActionButtonsEnabled();
+                UpdateCommitButtonsEnabled();
+
+                infoMessages.Add("未找到 Git 根目录。");
+                statusMessage = infoMessages.Count > 0 ? string.Join("\n", infoMessages) : string.Empty;
+                UpdateHeaderLabels();
+                RefreshListViews();
+                Repaint();
+                return;
+            }
+
+            _ = GitUtility.UnityProjectFolder;
+            refreshInfoMessages = infoMessages;
+
+            statusMessage = "正在刷新 Git 状态...";
+            UpdateHeaderLabels();
+            RefreshListViews();
+            Repaint();
+
+            refreshTask = Task.Run(() => GitUtility.GetWorkingTreeChanges() ?? new List<GitChangeEntry>());
+            refreshTask.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
+        }
+
+        private void ApplyGitChanges(List<GitChangeEntry> changes, List<string> infoMessages)
+        {
+            gitChanges = changes ?? new List<GitChangeEntry>();
+
             if (gitChanges.Count == 0)
             {
                 infoMessages.Add("Git 未检测到任何变更。");
             }
+            else if (targetAsset != null && !string.IsNullOrEmpty(targetAssetPath))
+            {
+                UpdateTargetSelectionInfo(gitChanges);
+            }
 
+            assetInfos.Clear();
             foreach (var change in gitChanges)
             {
                 var lastTime = GitUtility.GetLastKnownChangeTime(change.Path);
@@ -760,76 +1137,9 @@ namespace OneKey.GitTools
 
             historyDropdownVisible = true;
             historyDropdown.style.display = DisplayStyle.Flex;
-            PositionHistoryDropdown();
             historyListView.itemsSource = commitHistory;
             historyListView.RefreshItems();
             historyListView.ClearSelection();
-            rootVisualElement?.schedule.Execute(PositionHistoryDropdown).StartingIn(0);
-        }
-
-        private void PositionHistoryDropdown()
-        {
-            if (historyDropdown == null)
-            {
-                return;
-            }
-
-            var root = rootVisualElement;
-            historyDropdown.style.position = Position.Absolute;
-
-            var dropdownWidth = historyDropdown.resolvedStyle.width;
-            if (dropdownWidth <= 0f || float.IsNaN(dropdownWidth))
-            {
-                dropdownWidth = historyDropdown.layout.width;
-            }
-            if (dropdownWidth <= 0f || float.IsNaN(dropdownWidth))
-            {
-                dropdownWidth = 320f;
-            }
-
-            var dropdownHeight = historyDropdown.resolvedStyle.height;
-            if (dropdownHeight <= 0f || float.IsNaN(dropdownHeight))
-            {
-                dropdownHeight = historyDropdown.layout.height;
-            }
-            if (dropdownHeight <= 0f || float.IsNaN(dropdownHeight))
-            {
-                dropdownHeight = 240f;
-            }
-
-            var rootWidth = root.contentRect.width;
-            if (rootWidth <= 0f || float.IsNaN(rootWidth))
-            {
-                rootWidth = root.resolvedStyle.width;
-            }
-
-            var rootHeight = root.contentRect.height;
-            if (rootHeight <= 0f || float.IsNaN(rootHeight))
-            {
-                rootHeight = root.resolvedStyle.height;
-            }
-
-            if (rootWidth > 0f)
-            {
-                var maxAllowedWidth = Mathf.Max(100f, rootWidth - 40f);
-                dropdownWidth = Mathf.Min(dropdownWidth, maxAllowedWidth);
-            }
-
-            if (rootHeight > 0f)
-            {
-                var maxAllowedHeight = Mathf.Max(80f, rootHeight - 40f);
-                dropdownHeight = Mathf.Min(dropdownHeight, maxAllowedHeight);
-            }
-
-            var desiredLeft = rootWidth > 0f ? (rootWidth - dropdownWidth) * 0.5f : 0f;
-            var desiredTop = rootHeight > 0f ? (rootHeight - dropdownHeight) * 0.5f : 0f;
-            desiredLeft = Mathf.Max(0f, desiredLeft);
-            desiredTop = Mathf.Max(0f, desiredTop);
-
-            historyDropdown.style.width = dropdownWidth;
-            historyDropdown.style.height = dropdownHeight;
-            historyDropdown.style.left = desiredLeft;
-            historyDropdown.style.top = desiredTop;
         }
 
         private void HideHistoryDropdown()
@@ -920,6 +1230,7 @@ namespace OneKey.GitTools
             var path = GetCommitHistoryFilePath();
             if (!File.Exists(path))
             {
+                LoadCommitHistoryFromGitFallback();
                 return;
             }
 
@@ -957,6 +1268,27 @@ namespace OneKey.GitTools
             {
                 Debug.LogWarning($"GitQuickCommit: 解析提交记录失败: {ex.Message}");
                 commitHistory.Clear();
+            }
+
+            if (commitHistory.Count == 0)
+            {
+                LoadCommitHistoryFromGitFallback();
+            }
+        }
+
+        private void LoadCommitHistoryFromGitFallback()
+        {
+            try
+            {
+                var gitMessages = GitUtility.GetRecentCommitMessages(MaxCommitHistoryEntries);
+                if (gitMessages != null && gitMessages.Count > 0)
+                {
+                    commitHistory.AddRange(gitMessages);
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"GitQuickCommit: 读取Git提交记录失败: {ex.Message}");
             }
         }
 
@@ -1030,40 +1362,56 @@ namespace OneKey.GitTools
                 return;
             }
 
-            var normalizedMessage = message.Trim();
-
-            if (!GitUtility.Commit(normalizedMessage, out var commitSummary))
+            if (refreshInProgress || gitOperationInProgress)
             {
-                EditorUtility.DisplayDialog("提交", commitSummary, "确定");
+                ShowTempNotification("正在执行其他操作，请稍候。");
                 return;
             }
 
-            AddCommitMessageToHistory(normalizedMessage);
-            var finalSummary = commitSummary;
+            var normalizedMessage = message.Trim();
+            var gitRoot = GitUtility.ProjectRoot;
+            _ = GitUtility.UnityProjectFolder;
 
-            if (pushAfter)
+            if (string.IsNullOrEmpty(gitRoot))
             {
-                if (GitUtility.Push(out var pushSummary))
-                {
-                    finalSummary = commitSummary + "\n" + pushSummary;
-                }
-                else
-                {
-                    var pushFailMessage = "\n推送失败：远程可能已有新的提交，请在 UGit 中先拉取更新并解决冲突后再推送。";
-                    var extraInfo = string.IsNullOrEmpty(pushSummary) ? string.Empty : "\n" + pushSummary;
-                    finalSummary = commitSummary + pushFailMessage + extraInfo;
-                }
+                EditorUtility.DisplayDialog("提交", "未找到 Git 根目录。", "确定");
+                return;
             }
 
-            EditorUtility.DisplayDialog("提交", finalSummary, "确定");
-            commitMessage = string.Empty;
-            if (commitMessageField != null)
-            {
-                commitMessageField.value = string.Empty;
-            }
-            HideHistoryDropdown();
+            gitOperationInProgress = true;
+            gitOperationKind = pushAfter ? GitOperationKind.CommitAndPush : GitOperationKind.Commit;
+            UpdateActionButtonsEnabled();
             UpdateCommitButtonsEnabled();
-            RefreshData();
+
+            statusMessage = pushAfter ? "正在提交并推送..." : "正在提交...";
+            UpdateHeaderLabels();
+            Repaint();
+
+            gitOperationTask = Task.Run(() =>
+            {
+                if (!GitUtility.CommitGit(gitRoot, normalizedMessage, out var commitSummary))
+                {
+                    return new GitOperationResult(false, commitSummary, false, null);
+                }
+
+                var finalSummary = commitSummary;
+                if (pushAfter)
+                {
+                    if (GitUtility.PushGit(gitRoot, out var pushSummary))
+                    {
+                        finalSummary = commitSummary + "\\n" + pushSummary;
+                    }
+                    else
+                    {
+                        var pushFailMessage = "\\n推送失败：远程可能已有新的提交，请在 UGit 中先拉取更新并解决冲突后再推送。";
+                        var extraInfo = string.IsNullOrEmpty(pushSummary) ? string.Empty : "\\n" + pushSummary;
+                        finalSummary = commitSummary + pushFailMessage + extraInfo;
+                    }
+                }
+
+                return new GitOperationResult(true, finalSummary, true, normalizedMessage);
+            });
+            gitOperationTask.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
         }
 
         private void UpdateHeaderLabels()
@@ -1071,8 +1419,8 @@ namespace OneKey.GitTools
             if (pathLabel != null)
             {
                 pathLabel.text = string.IsNullOrEmpty(targetAssetPath)
-                    ? "路径: (未选择)"
-                    : $"路径: {targetAssetPath}";
+                    ? "路径：未选择（显示全部）"
+                    : $"路径：{targetAssetPath}";
             }
 
             if (statusLabel != null)
@@ -1086,12 +1434,37 @@ namespace OneKey.GitTools
             var hasMessage = !string.IsNullOrWhiteSpace(commitMessage);
             if (commitButton != null)
             {
-                commitButton.SetEnabled(hasMessage);
+                commitButton.SetEnabled(hasMessage && !refreshInProgress && !gitOperationInProgress);
             }
 
             if (commitAndPushButton != null)
             {
-                commitAndPushButton.SetEnabled(hasMessage);
+                commitAndPushButton.SetEnabled(hasMessage && !refreshInProgress && !gitOperationInProgress);
+            }
+        }
+
+        private void UpdateActionButtonsEnabled()
+        {
+            var enabled = !refreshInProgress && !gitOperationInProgress;
+
+            if (refreshButton != null)
+            {
+                refreshButton.SetEnabled(enabled);
+            }
+
+            if (toStagedButton != null)
+            {
+                toStagedButton.SetEnabled(enabled);
+            }
+
+            if (toUnstagedButton != null)
+            {
+                toUnstagedButton.SetEnabled(enabled);
+            }
+
+            if (resetTimeButton != null)
+            {
+                resetTimeButton.SetEnabled(enabled);
             }
         }
 
@@ -1129,12 +1502,12 @@ namespace OneKey.GitTools
 
             if (unstagedHeaderLabel != null)
             {
-                unstagedHeaderLabel.text = $"工作区变更（未暂存）：{unstaged.Count} 项";
+                unstagedHeaderLabel.text = $"\u5de5\u4f5c\u533a\u53d8\u66f4\uff08\u672a\u6682\u5b58\uff09\uff1a{unstaged.Count} \u9879";
             }
 
             if (stagedHeaderLabel != null)
             {
-                stagedHeaderLabel.text = $"待提交（已暂存）：{staged.Count} 项";
+                stagedHeaderLabel.text = $"\u5f85\u63d0\u4ea4\uff08\u5df2\u6682\u5b58\uff09\uff1a{staged.Count} \u9879";
             }
 
             if (unstagedSelectAllToggle != null)
@@ -1259,7 +1632,7 @@ namespace OneKey.GitTools
                 if (evt.clickCount >= 2)
                 {
                     CopyToClipboard(info.FileName);
-                    ShowTempNotification($"已复制名称 {info.FileName}");
+                    ShowTempNotification($"已复制名称：{info.FileName}");
                 }
                 else if (evt.clickCount == 1)
                 {
@@ -1309,7 +1682,7 @@ namespace OneKey.GitTools
                 if (evt.clickCount >= 2)
                 {
                     CopyToClipboard(info.AssetPath);
-                    ShowTempNotification($"已复制路径 {info.AssetPath}");
+                    ShowTempNotification($"已复制路径：{info.AssetPath}");
                 }
             });
 
@@ -1325,11 +1698,47 @@ namespace OneKey.GitTools
                 };
                 excludeButton.style.marginLeft = 4;
                 pathRow.Add(excludeButton);
+
+                var discardButton = new Button(() => ConfirmDiscardChange(info))
+                {
+                    text = "放弃更改"
+                };
+                discardButton.style.marginLeft = 4;
+                pathRow.Add(discardButton);
             }
 
             container.Add(pathRow);
 
             return container;
+        }
+
+        private void ConfirmDiscardChange(GitAssetInfo info)
+        {
+            if (info == null || string.IsNullOrEmpty(info.AssetPath))
+            {
+                return;
+            }
+
+            var confirmed = EditorUtility.DisplayDialog(
+                "\u653e\u5f03\u66f4\u6539",
+                $"\u786e\u5b9a\u653e\u5f03\u4ee5\u4e0b\u66f4\u6539\uff1f\n{info.AssetPath}\n\n\u6b64\u64cd\u4f5c\u4e0d\u53ef\u64a4\u9500\u3002",
+                "\u653e\u5f03",
+                "\u53d6\u6d88");
+            if (!confirmed)
+            {
+                return;
+            }
+
+            var success = GitUtility.DiscardChanges(new[] { info }, out var summary);
+            if (success)
+            {
+                RefreshData();
+                ShowTempNotification(string.IsNullOrEmpty(summary) ? "\u5df2\u653e\u5f03\u66f4\u6539\u3002" : summary);
+            }
+            else
+            {
+                ShowTempNotification(string.IsNullOrEmpty(summary) ? "\u653e\u5f03\u66f4\u6539\u5931\u8d25\u3002" : summary);
+            }
         }
 
         private void UpdateRepositoryStatusInfo()
@@ -1380,7 +1789,7 @@ namespace OneKey.GitTools
             return relevantPaths.Contains(assetPath);
         }
 
-        private void UpdateTargetSelectionInfo()
+        private void UpdateTargetSelectionInfo(IReadOnlyList<GitChangeEntry> currentChanges)
         {
             relevantPaths.Clear();
             selectedTargetIsFolder = AssetDatabase.IsValidFolder(targetAssetPath);
@@ -1399,6 +1808,8 @@ namespace OneKey.GitTools
             var dependencies = AssetDatabase.GetDependencies(targetAssetPath, true);
             if (dependencies == null || dependencies.Length == 0)
             {
+                AddAncestorFolderMetas(targetAssetPath);
+                AddReverseDependenciesFromChanges(currentChanges);
                 return;
             }
 
@@ -1406,6 +1817,9 @@ namespace OneKey.GitTools
             {
                 AddRelevantPath(dep);
             }
+
+            AddAncestorFolderMetasForCurrentRelevantPaths();
+            AddReverseDependenciesFromChanges(currentChanges);
         }
 
         private void AddRelevantPath(string path)
@@ -1420,6 +1834,117 @@ namespace OneKey.GitTools
             if (!normalized.EndsWith(".meta", StringComparison.OrdinalIgnoreCase))
             {
                 relevantPaths.Add($"{normalized}.meta");
+            }
+        }
+
+        private void AddAncestorFolderMetasForCurrentRelevantPaths()
+        {
+            foreach (var path in relevantPaths.ToList())
+            {
+                if (string.IsNullOrEmpty(path) || path.EndsWith(".meta", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                AddAncestorFolderMetas(path);
+            }
+        }
+
+        private void AddAncestorFolderMetas(string assetPath)
+        {
+            if (string.IsNullOrEmpty(assetPath))
+            {
+                return;
+            }
+
+            var normalized = GitUtility.NormalizeAssetPath(assetPath);
+            if (string.IsNullOrEmpty(normalized))
+            {
+                return;
+            }
+
+            var lastSlash = normalized.LastIndexOf('/');
+            while (lastSlash > 0)
+            {
+                var folder = normalized.Substring(0, lastSlash);
+                if (!string.IsNullOrEmpty(folder) && !folder.Equals("Assets", StringComparison.OrdinalIgnoreCase))
+                {
+                    relevantPaths.Add($"{folder}.meta");
+                }
+
+                lastSlash = folder.LastIndexOf('/');
+            }
+        }
+
+        private void AddReverseDependenciesFromChanges(IReadOnlyList<GitChangeEntry> currentChanges)
+        {
+            if (currentChanges == null || currentChanges.Count == 0)
+            {
+                return;
+            }
+
+            if (string.IsNullOrEmpty(targetAssetPath))
+            {
+                return;
+            }
+
+            var target = GitUtility.NormalizeAssetPath(targetAssetPath);
+            if (string.IsNullOrEmpty(target))
+            {
+                return;
+            }
+
+            foreach (var entry in currentChanges)
+            {
+                var changedPath = GitUtility.NormalizeAssetPath(entry.Path);
+                if (string.IsNullOrEmpty(changedPath))
+                {
+                    continue;
+                }
+
+                if (changedPath.EndsWith(".meta", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (string.Equals(changedPath, target, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (!changedPath.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (AssetDatabase.IsValidFolder(changedPath))
+                {
+                    continue;
+                }
+
+                string[] deps;
+                try
+                {
+                    deps = AssetDatabase.GetDependencies(changedPath, true);
+                }
+                catch
+                {
+                    continue;
+                }
+
+                if (deps == null || deps.Length == 0)
+                {
+                    continue;
+                }
+
+                var referencesTarget = deps.Any(d => string.Equals(GitUtility.NormalizeAssetPath(d), target, StringComparison.OrdinalIgnoreCase));
+                if (!referencesTarget)
+                {
+                    continue;
+                }
+
+                AddRelevantPath(changedPath);
+                AddAncestorFolderMetas(changedPath);
             }
         }
 

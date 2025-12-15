@@ -1,8 +1,10 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
@@ -90,6 +92,10 @@ namespace OneKey.GitTools
 
     internal static class GitUtility
     {
+        private const int GitCommandTimeoutShortMs = 30_000;
+        private const int GitCommandTimeoutMediumMs = 120_000;
+        private const int GitCommandTimeoutLongMs = 300_000;
+
         private static string cachedProjectRoot;
         private static string cachedUnityProjectFolder;
         private static string contextAssetAbsolutePath;
@@ -105,7 +111,11 @@ namespace OneKey.GitTools
                     cachedProjectRoot = LocateGitRoot();
                     if (string.IsNullOrEmpty(cachedProjectRoot))
                     {
-                        gitRootNotFoundLogged = true;
+                        if (!gitRootNotFoundLogged)
+                        {
+                            Debug.LogWarning("GitQuickCommit: 未找到Git根目录（.git）。请确认当前Unity工程在Git仓库内，且已安装并可在命令行调用 git。");
+                            gitRootNotFoundLogged = true;
+                        }
                     }
                     else
                     {
@@ -115,6 +125,26 @@ namespace OneKey.GitTools
 
                 return cachedProjectRoot;
             }
+        }
+
+        internal static string UnityProjectFolder => GetUnityProjectFolder();
+
+        internal readonly struct GitStageRequest
+        {
+            public readonly string GitRelativePath;
+            public readonly GitChangeType ChangeType;
+
+            public GitStageRequest(string gitRelativePath, GitChangeType changeType)
+            {
+                GitRelativePath = gitRelativePath;
+                ChangeType = changeType;
+            }
+        }
+
+        internal static bool TryGetGitRelativePath(string unityAssetPath, out string gitRelativePath)
+        {
+            gitRelativePath = ConvertUnityPathToGitPath(unityAssetPath);
+            return !string.IsNullOrEmpty(gitRelativePath);
         }
 
         internal static string NormalizeAssetPath(string assetPath)
@@ -161,31 +191,51 @@ namespace OneKey.GitTools
         {
             var result = new List<GitChangeEntry>();
 
-            if (!TryRunGitCommand("status --porcelain", out var output))
+            // Use --untracked-files=all so untracked directories are expanded into files;
+            // otherwise Git may collapse them as "?? someDir/" which Unity can't stage/commit precisely.
+            if (!TryRunGitCommandRaw("status --porcelain=v1 -z --untracked-files=all", out var output, out _))
             {
                 return result;
             }
 
-            var lines = output.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
-            foreach (var rawLine in lines)
+            if (string.IsNullOrEmpty(output))
             {
-                var line = rawLine.TrimEnd();
-                if (line.Length < 4)
+                return result;
+            }
+
+            var records = output.Split('\0');
+            for (var i = 0; i < records.Length; i++)
+            {
+                var record = records[i];
+                if (string.IsNullOrEmpty(record))
                 {
                     continue;
                 }
 
-                var statusCode = line.Substring(0, 2);
-                var pathSegment = line.Substring(3).Trim();
+                record = record.TrimEnd('\r', '\n');
+                if (record.Length < 4 || record[2] != ' ')
+                {
+                    continue;
+                }
+
+                var statusCode = record.Substring(0, 2);
+                var pathSegment = record.Substring(3);
                 if (string.IsNullOrEmpty(pathSegment))
                 {
                     continue;
                 }
 
-                var normalizedPath = NormalizeStatusPath(pathSegment);
-                if (string.IsNullOrEmpty(normalizedPath))
+                // In porcelain v1 -z, rename/copy paths are emitted as two NUL-separated fields:
+                // "XY old\0new\0". Prefer the destination path for display/stage.
+                var statusPrimary = statusCode[0] != ' ' ? statusCode[0] : statusCode[1];
+                if ((statusPrimary == 'R' || statusPrimary == 'C') && i + 1 < records.Length)
                 {
-                    continue;
+                    var destination = records[i + 1];
+                    if (!string.IsNullOrEmpty(destination))
+                    {
+                        pathSegment = destination;
+                        i++;
+                    }
                 }
 
                 var changeType = ParseChangeType(statusCode);
@@ -204,7 +254,7 @@ namespace OneKey.GitTools
                     continue;
                 }
 
-                var unityRelativePath = ConvertGitPathToUnityPath(normalizedPath);
+                var unityRelativePath = ConvertGitPathToUnityPath(pathSegment);
                 if (string.IsNullOrEmpty(unityRelativePath))
                 {
                     continue;
@@ -300,7 +350,7 @@ namespace OneKey.GitTools
                 return null;
             }
 
-            if (!TryRunGitCommand($"log -1 --format=%ct -- \"{gitRelativePath}\"", out var output))
+            if (!TryRunGitCommand(BuildGitArgs("log -1 --format=%ct", gitRelativePath), out var output))
             {
                 return null;
             }
@@ -358,7 +408,7 @@ namespace OneKey.GitTools
             };
         }
 
-        private static bool TryRunGitCommand(string arguments, out string output)
+        private static bool TryRunGitCommand(string arguments, out string output, int timeoutMilliseconds = GitCommandTimeoutShortMs)
         {
             output = string.Empty;
 
@@ -368,39 +418,470 @@ namespace OneKey.GitTools
                 return false;
             }
 
+            if (!TryRunGitProcess(gitRoot, arguments, timeoutMilliseconds, out var standardOutput, out var standardError))
+            {
+                if (!string.IsNullOrEmpty(standardError))
+                {
+                    Debug.LogWarning($"Git命令执行失败: git {arguments}\n{standardError}");
+                }
+                else
+                {
+                    Debug.LogWarning($"Git命令执行失败: git {arguments}");
+                }
+
+                return false;
+            }
+
+            output = standardOutput;
+            return true;
+        }
+
+        private static bool TryRunGitCommandRaw(string arguments, out string output, out string error, int timeoutMilliseconds = GitCommandTimeoutShortMs)
+        {
+            output = string.Empty;
+            error = string.Empty;
+
+            var gitRoot = ProjectRoot;
+            if (string.IsNullOrEmpty(gitRoot))
+            {
+                return false;
+            }
+
+            if (!TryRunGitProcessRaw(gitRoot, arguments, timeoutMilliseconds, out output, out error))
+            {
+                if (!string.IsNullOrEmpty(error))
+                {
+                    Debug.LogWarning($"Git命令执行失败: git {arguments}\n{error}");
+                }
+                else
+                {
+                    Debug.LogWarning($"Git命令执行失败: git {arguments}");
+                }
+
+                return false;
+            }
+
+            return true;
+        }
+
+        private static bool TryRunGitCommandNoLog(string gitRoot, string arguments, int timeoutMilliseconds, out string standardOutput, out string standardError)
+        {
+            standardOutput = string.Empty;
+            standardError = string.Empty;
+
+            if (string.IsNullOrEmpty(gitRoot))
+            {
+                standardError = "未找到 Git 根目录。";
+                return false;
+            }
+
+            return TryRunGitProcess(gitRoot, arguments, timeoutMilliseconds, out standardOutput, out standardError);
+        }
+
+        internal static bool StageGitPaths(string gitRoot, IReadOnlyList<GitStageRequest> requests, out string summary)
+        {
+            summary = string.Empty;
+
+            if (requests == null || requests.Count == 0)
+            {
+                summary = "没有可发送的变更。";
+                return false;
+            }
+
+            var total = 0;
+            var succeeded = 0;
+            var firstError = string.Empty;
+
+            foreach (var request in requests)
+            {
+                if (string.IsNullOrEmpty(request.GitRelativePath))
+                {
+                    continue;
+                }
+
+                total++;
+
+                var arguments = request.ChangeType == GitChangeType.Deleted
+                    ? BuildGitArgs("add -u", request.GitRelativePath)
+                    : BuildGitArgs("add", request.GitRelativePath);
+
+                if (TryRunGitCommandNoLog(gitRoot, arguments, GitCommandTimeoutShortMs, out _, out var stderr))
+                {
+                    succeeded++;
+                    continue;
+                }
+
+                if (string.IsNullOrEmpty(firstError) && !string.IsNullOrEmpty(stderr))
+                {
+                    firstError = stderr.Trim();
+                }
+            }
+
+            if (total == 0)
+            {
+                summary = "没有可发送的变更。";
+                return false;
+            }
+
+            summary = $"已发送至待提交: {succeeded}/{total} 个条目。";
+            if (succeeded == 0 && !string.IsNullOrEmpty(firstError))
+            {
+                summary = $"{summary}\n{firstError}";
+            }
+
+            return succeeded > 0;
+        }
+
+        internal static bool UnstageGitPaths(string gitRoot, IReadOnlyList<string> gitRelativePaths, out string summary)
+        {
+            summary = string.Empty;
+
+            if (gitRelativePaths == null || gitRelativePaths.Count == 0)
+            {
+                summary = "没有可移出的待提交项。";
+                return false;
+            }
+
+            var total = 0;
+            var succeeded = 0;
+            var firstError = string.Empty;
+
+            foreach (var gitPath in gitRelativePaths)
+            {
+                if (string.IsNullOrEmpty(gitPath))
+                {
+                    continue;
+                }
+
+                total++;
+                var arguments = BuildGitArgs("reset HEAD", gitPath);
+                if (TryRunGitCommandNoLog(gitRoot, arguments, GitCommandTimeoutShortMs, out _, out var stderr))
+                {
+                    succeeded++;
+                    continue;
+                }
+
+                if (string.IsNullOrEmpty(firstError) && !string.IsNullOrEmpty(stderr))
+                {
+                    firstError = stderr.Trim();
+                }
+            }
+
+            if (total == 0)
+            {
+                summary = "没有可移出的待提交项。";
+                return false;
+            }
+
+            summary = $"已从待提交移出: {succeeded}/{total} 个条目。";
+            if (succeeded == 0 && !string.IsNullOrEmpty(firstError))
+            {
+                summary = $"{summary}\n{firstError}";
+            }
+
+            return succeeded > 0;
+        }
+
+        internal static bool CommitGit(string gitRoot, string message, out string summary)
+        {
+            summary = string.Empty;
+
+            if (string.IsNullOrWhiteSpace(message))
+            {
+                summary = "提交说明不能为空。";
+                return false;
+            }
+
+            var safeMessage = message.Trim().Replace("\r", " ").Replace("\n", " ");
+
+            if (!TryRunGitCommandNoLog(gitRoot, "diff --cached --name-only", GitCommandTimeoutShortMs, out var diffOutput, out var diffError))
+            {
+                summary = string.IsNullOrEmpty(diffError)
+                    ? "无法检查待提交内容，请确认仓库状态。"
+                    : $"无法检查待提交内容，请确认仓库状态。\n{diffError.Trim()}";
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(diffOutput))
+            {
+                summary = "当前没有已暂存的变更可提交。";
+                return false;
+            }
+
+            var commitArgs = $"commit -m {QuoteGitArgument(safeMessage)}";
+            if (!TryRunGitCommandNoLog(gitRoot, commitArgs, GitCommandTimeoutMediumMs, out _, out var commitError))
+            {
+                summary = string.IsNullOrEmpty(commitError)
+                    ? "提交失败，请查看 Console 日志中的 Git 输出。"
+                    : $"提交失败：{commitError.Trim()}";
+                return false;
+            }
+
+            summary = "提交成功。";
+            return true;
+        }
+
+        internal static bool PushGit(string gitRoot, out string summary)
+        {
+            summary = string.Empty;
+
+            if (!TryRunGitCommandNoLog(gitRoot, "push", GitCommandTimeoutLongMs, out _, out var pushError))
+            {
+                summary = string.IsNullOrEmpty(pushError)
+                    ? "推送失败，请查看 Console 日志中的 Git 输出。"
+                    : pushError.Trim();
+                return false;
+            }
+
+            summary = "推送成功。";
+            return true;
+        }
+
+        private static string QuoteGitArgument(string argument)
+        {
+            if (argument == null)
+            {
+                return "\"\"";
+            }
+
+            var needsQuotes = argument.Length == 0
+                              || argument.IndexOfAny(new[] { ' ', '\t', '\n', '\r', '"' }) >= 0;
+
+            if (!needsQuotes)
+            {
+                return argument;
+            }
+
+            var sb = new StringBuilder();
+            sb.Append('"');
+
+            var backslashCount = 0;
+            foreach (var c in argument)
+            {
+                if (c == '\\')
+                {
+                    backslashCount++;
+                    continue;
+                }
+
+                if (c == '"')
+                {
+                    sb.Append('\\', backslashCount * 2 + 1);
+                    sb.Append('"');
+                    backslashCount = 0;
+                    continue;
+                }
+
+                if (backslashCount > 0)
+                {
+                    sb.Append('\\', backslashCount);
+                    backslashCount = 0;
+                }
+
+                sb.Append(c);
+            }
+
+            if (backslashCount > 0)
+            {
+                sb.Append('\\', backslashCount * 2);
+            }
+
+            sb.Append('"');
+            return sb.ToString();
+        }
+
+        private static string BuildGitArgs(string baseArguments, params string[] paths)
+        {
+            if (paths == null || paths.Length == 0)
+            {
+                return baseArguments;
+            }
+
+            var sb = new StringBuilder(baseArguments);
+            sb.Append(" --");
+
+            foreach (var path in paths)
+            {
+                if (string.IsNullOrEmpty(path))
+                {
+                    continue;
+                }
+
+                sb.Append(' ');
+                sb.Append(QuoteGitArgument(path));
+            }
+
+            return sb.ToString();
+        }
+
+        private static bool TryRunGitProcess(string workingDirectory, string arguments, int timeoutMilliseconds, out string standardOutput, out string standardError)
+        {
+            standardOutput = string.Empty;
+            standardError = string.Empty;
+
+            if (string.IsNullOrEmpty(workingDirectory) || !Directory.Exists(workingDirectory))
+            {
+                return false;
+            }
+
+            if (timeoutMilliseconds <= 0)
+            {
+                timeoutMilliseconds = GitCommandTimeoutShortMs;
+            }
+
             try
             {
-                using var process = new Process
+                using var process = new Process();
+                var outputBuilder = new StringBuilder();
+                var errorBuilder = new StringBuilder();
+                var outputLock = new object();
+                var errorLock = new object();
+
+                process.StartInfo = new ProcessStartInfo
                 {
-                    StartInfo = new ProcessStartInfo
+                    FileName = "git",
+                    Arguments = arguments,
+                    WorkingDirectory = workingDirectory,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true,
+                    StandardOutputEncoding = Encoding.UTF8,
+                    StandardErrorEncoding = Encoding.UTF8
+                };
+
+                process.OutputDataReceived += (_, args) =>
+                {
+                    if (args.Data == null)
                     {
-                        FileName = "git",
-                        Arguments = arguments,
-                        WorkingDirectory = gitRoot,
-                        UseShellExecute = false,
-                        RedirectStandardOutput = true,
-                        RedirectStandardError = true,
-                        CreateNoWindow = true
+                        return;
+                    }
+
+                    lock (outputLock)
+                    {
+                        outputBuilder.AppendLine(args.Data);
+                    }
+                };
+
+                process.ErrorDataReceived += (_, args) =>
+                {
+                    if (args.Data == null)
+                    {
+                        return;
+                    }
+
+                    lock (errorLock)
+                    {
+                        errorBuilder.AppendLine(args.Data);
                     }
                 };
 
                 process.Start();
-                var standardOutput = process.StandardOutput.ReadToEnd();
-                var standardError = process.StandardError.ReadToEnd();
-                process.WaitForExit();
+                process.BeginOutputReadLine();
+                process.BeginErrorReadLine();
 
-                if (process.ExitCode != 0)
+                if (!process.WaitForExit(timeoutMilliseconds))
                 {
-                    Debug.LogWarning($"Git命令执行失败: git {arguments}\n{standardError}");
+                    try
+                    {
+                        process.Kill();
+                    }
+                    catch
+                    {
+                        // ignored
+                    }
+
+                    standardError = $"Git命令超时（{timeoutMilliseconds}ms）: git {arguments}";
                     return false;
                 }
 
-                output = standardOutput;
-                return true;
+                process.WaitForExit();
+
+                lock (outputLock)
+                {
+                    standardOutput = outputBuilder.ToString();
+                }
+
+                lock (errorLock)
+                {
+                    standardError = errorBuilder.ToString();
+                }
+
+                return process.ExitCode == 0;
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"无法执行Git命令: {ex.Message}");
+                standardError = ex.Message;
+                return false;
+            }
+        }
+
+        private static bool TryRunGitProcessRaw(string workingDirectory, string arguments, int timeoutMilliseconds, out string standardOutput, out string standardError)
+        {
+            standardOutput = string.Empty;
+            standardError = string.Empty;
+
+            if (string.IsNullOrEmpty(workingDirectory) || !Directory.Exists(workingDirectory))
+            {
+                return false;
+            }
+
+            if (timeoutMilliseconds <= 0)
+            {
+                timeoutMilliseconds = GitCommandTimeoutShortMs;
+            }
+
+            try
+            {
+                using var process = new Process();
+                process.StartInfo = new ProcessStartInfo
+                {
+                    FileName = "git",
+                    Arguments = arguments,
+                    WorkingDirectory = workingDirectory,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true,
+                    StandardOutputEncoding = Encoding.UTF8,
+                    StandardErrorEncoding = Encoding.UTF8
+                };
+
+                process.Start();
+
+                var stdoutTask = process.StandardOutput.ReadToEndAsync();
+                var stderrTask = process.StandardError.ReadToEndAsync();
+
+                if (!process.WaitForExit(timeoutMilliseconds))
+                {
+                    try
+                    {
+                        process.Kill();
+                    }
+                    catch
+                    {
+                        // ignored
+                    }
+
+                    standardError = $"Git命令超时（{timeoutMilliseconds}ms）: git {arguments}";
+                    return false;
+                }
+
+                process.WaitForExit();
+
+                if (!Task.WaitAll(new Task[] { stdoutTask, stderrTask }, timeoutMilliseconds))
+                {
+                    standardError = $"Git输出读取超时（{timeoutMilliseconds}ms）: git {arguments}";
+                    return false;
+                }
+
+                standardOutput = stdoutTask.Result;
+                standardError = stderrTask.Result;
+                return process.ExitCode == 0;
+            }
+            catch (Exception ex)
+            {
+                standardError = ex.Message;
                 return false;
             }
         }
@@ -475,49 +956,26 @@ namespace OneKey.GitTools
                 return false;
             }
 
-            try
+            if (TryRunGitProcess(workingDirectory, "rev-parse --show-toplevel", GitCommandTimeoutShortMs, out var stdout, out var stderr))
             {
-                using var process = new Process
+                var firstLine = stdout.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+                if (!string.IsNullOrEmpty(firstLine))
                 {
-                    StartInfo = new ProcessStartInfo
-                    {
-                        FileName = "git",
-                        Arguments = "rev-parse --show-toplevel",
-                        WorkingDirectory = workingDirectory,
-                        UseShellExecute = false,
-                        RedirectStandardOutput = true,
-                        RedirectStandardError = true,
-                        CreateNoWindow = true
-                    }
-                };
-
-                process.Start();
-                var stdout = process.StandardOutput.ReadToEnd();
-                var stderr = process.StandardError.ReadToEnd();
-                process.WaitForExit();
-
-                if (process.ExitCode == 0)
-                {
-                    var firstLine = stdout.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
-                    if (!string.IsNullOrEmpty(firstLine))
-                    {
-                        rootPath = Path.GetFullPath(firstLine.Trim());
-                        return true;
-                    }
+                    rootPath = Path.GetFullPath(firstLine.Trim());
+                    return true;
                 }
-                else if (!string.IsNullOrEmpty(stderr) && !gitRevParseWarningLogged)
-                {
-                    if (stderr.IndexOf("not a git repository", StringComparison.OrdinalIgnoreCase) < 0)
-                    {
-                        Debug.LogWarning($"GitQuickCommit: rev-parse 失败: {stderr}");
-                    }
 
-                    gitRevParseWarningLogged = true;
-                }
+                return false;
             }
-            catch (Exception ex)
+
+            if (!string.IsNullOrEmpty(stderr) && !gitRevParseWarningLogged)
             {
-                Debug.LogWarning($"GitQuickCommit: 调用 git rev-parse 失败: {ex.Message}");
+                if (stderr.IndexOf("not a git repository", StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    Debug.LogWarning($"GitQuickCommit: rev-parse 失败: {stderr}");
+                }
+
+                gitRevParseWarningLogged = true;
             }
 
             return false;
@@ -645,11 +1103,11 @@ namespace OneKey.GitTools
                 if (info.ChangeType == GitChangeType.Deleted)
                 {
                     // 对已删除文件使用 -u 方式只更新已跟踪条目的删除状态
-                    arguments = $"add -u -- \"{gitPath}\"";
+                    arguments = BuildGitArgs("add -u", gitPath);
                 }
                 else
                 {
-                    arguments = $"add -- \"{gitPath}\"";
+                    arguments = BuildGitArgs("add", gitPath);
                 }
 
                 Debug.Log($"[GitQuickCommit] Stage: type={info.ChangeType}, unityPath={info.AssetPath}, gitPath={gitPath}, args=git {arguments}");
@@ -672,6 +1130,70 @@ namespace OneKey.GitTools
 
             summary = $"已发送至待提交: {succeeded}/{total} 个条目。";
             return succeeded > 0;
+        }
+
+        internal static bool DiscardChanges(IEnumerable<GitAssetInfo> assets, out string summary)
+        {
+            var list = assets?.Where(a => a != null && !string.IsNullOrEmpty(a.AssetPath)).ToList() ?? new List<GitAssetInfo>();
+            if (list.Count == 0)
+            {
+                summary = "\u6ca1\u6709\u53ef\u653e\u5f03\u7684\u66f4\u6539\u3002";
+                return false;
+            }
+
+            var total = 0;
+            var succeeded = 0;
+
+            foreach (var info in list)
+            {
+                total++;
+                if (DiscardSinglePath(info, info.AssetPath))
+                {
+                    succeeded++;
+                }
+
+                if (!info.AssetPath.EndsWith(".meta", StringComparison.OrdinalIgnoreCase))
+                {
+                    DiscardSinglePath(info, $"{info.AssetPath}.meta");
+                }
+            }
+
+            summary = succeeded == total
+                ? $"\u5df2\u653e\u5f03 {succeeded} \u9879\u66f4\u6539\u3002"
+                : $"\u5df2\u653e\u5f03 {succeeded}/{total} \u9879\u66f4\u6539\uff08\u5176\u4f59\u8bf7\u67e5\u770b Console \u65e5\u5fd7\uff09\u3002";
+            return succeeded > 0;
+        }
+
+        private static bool DiscardSinglePath(GitAssetInfo info, string unityPath)
+        {
+            if (info == null || string.IsNullOrEmpty(unityPath))
+            {
+                return false;
+            }
+
+            var gitPath = ConvertUnityPathToGitPath(unityPath);
+            if (string.IsNullOrEmpty(gitPath))
+            {
+                return false;
+            }
+
+            var isFolder = unityPath.EndsWith("/", StringComparison.Ordinal) || AssetDatabase.IsValidFolder(unityPath);
+
+            var resetOk = true;
+            if (info.IsStaged)
+            {
+                resetOk = TryRunGitCommand(BuildGitArgs("reset -q HEAD", gitPath), out _);
+            }
+
+            if (info.ChangeType == GitChangeType.Added)
+            {
+                var cleanFlags = isFolder ? "-fd" : "-f";
+                var cleanOk = TryRunGitCommand(BuildGitArgs($"clean {cleanFlags}", gitPath), out _);
+                return resetOk && cleanOk;
+            }
+
+            var checkoutOk = TryRunGitCommand(BuildGitArgs("checkout", gitPath), out _);
+            return resetOk && checkoutOk;
         }
 
         internal static bool UnstageAssets(IEnumerable<GitAssetInfo> assets, out string summary)
@@ -697,7 +1219,7 @@ namespace OneKey.GitTools
                     continue;
                 }
 
-                var arguments = $"reset HEAD -- \"{gitPath}\"";
+                var arguments = BuildGitArgs("reset HEAD", gitPath);
                 Debug.Log($"[GitQuickCommit] Unstage: unityPath={info.AssetPath}, gitPath={gitPath}, args=git {arguments}");
 
                 if (TryRunGitCommand(arguments, out _))
@@ -731,8 +1253,7 @@ namespace OneKey.GitTools
             }
 
             var trimmed = message.Trim();
-            // 避免双引号导致命令行解析问题，将其替换为单引号
-            var safeMessage = trimmed.Replace("\"", "'");
+            var safeMessage = trimmed.Replace("\r", " ").Replace("\n", " ");
 
             if (!TryRunGitCommand($"diff --cached --name-only", out var diffOutput))
             {
@@ -746,7 +1267,7 @@ namespace OneKey.GitTools
                 return false;
             }
 
-            if (!TryRunGitCommand($"commit -m \"{safeMessage}\"", out var output))
+            if (!TryRunGitCommand($"commit -m {QuoteGitArgument(safeMessage)}", out var output, GitCommandTimeoutMediumMs))
             {
                 summary = "提交失败，请查看 Console 日志中的 Git 输出。";
                 return false;
@@ -760,7 +1281,7 @@ namespace OneKey.GitTools
         {
             summary = string.Empty;
 
-            if (!TryRunGitCommand("push", out var output))
+            if (!TryRunGitCommand("push", out var output, GitCommandTimeoutLongMs))
             {
                 summary = "推送失败，请查看 Console 日志中的 Git 输出。";
                 return false;
@@ -768,6 +1289,32 @@ namespace OneKey.GitTools
 
             summary = "推送成功。";
             return true;
+        }
+
+        internal static List<string> GetRecentCommitMessages(int maxCount)
+        {
+            var results = new List<string>();
+            if (maxCount <= 0)
+            {
+                return results;
+            }
+
+            if (!TryRunGitCommand($"log -n {maxCount} --format=%s", out var output))
+            {
+                return results;
+            }
+
+            var lines = output.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (var line in lines)
+            {
+                var trimmed = line.Trim();
+                if (!string.IsNullOrEmpty(trimmed))
+                {
+                    results.Add(trimmed);
+                }
+            }
+
+            return results;
         }
 
         private static string ResolveAbsolutePath(string relativePath)
