@@ -31,8 +31,8 @@ namespace OneKey.GitTools
         private readonly HashSet<string> excludedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private List<GitChangeEntry> gitChanges = new List<GitChangeEntry>();
         private readonly HashSet<string> relevantPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        private bool selectedTargetIsFolder;
-        private string targetFolderPrefix;
+        private readonly List<string> targetAssetPaths = new List<string>();
+        private readonly List<string> targetFolderPrefixes = new List<string>();
 
         private Task<List<GitChangeEntry>> refreshTask;
         private bool refreshInProgress;
@@ -71,6 +71,7 @@ namespace OneKey.GitTools
         // 选择状态：左侧未暂存 / 右侧已暂存
         private readonly HashSet<string> selectedUnstagedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> selectedStagedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private HashSet<string> initialStagedPaths;
         private bool showAdded = true;
         private bool showModified = true;
         private bool showDeleted = true;
@@ -85,6 +86,8 @@ namespace OneKey.GitTools
         private string commitMessage = string.Empty;
         private string repositoryStatusMessage = "\u6b63\u5728\u68c0\u6d4b Git \u72b6\u6001...";
         private List<string> commitHistory;
+        private List<string> savedCommitHistory;
+        private List<string> fallbackCommitHistory;
         private bool historyDropdownVisible;
 
         // UI Toolkit elements
@@ -123,84 +126,155 @@ namespace OneKey.GitTools
         [MenuItem("Assets/\u5feb\u6377Git\u63d0\u4ea4", false, 2000)]
         private static void OpenFromContext()
         {
-            var obj = Selection.activeObject;
-            if (obj == null)
+            var objects = Selection.objects;
+            if (objects == null || objects.Length == 0)
+            {
+                return;
+            }
+
+            var assets = new List<UnityEngine.Object>();
+            foreach (var obj in objects)
+            {
+                if (obj == null)
+                {
+                    continue;
+                }
+
+                var path = AssetDatabase.GetAssetPath(obj);
+                if (string.IsNullOrEmpty(path))
+                {
+                    continue;
+                }
+
+                assets.Add(obj);
+            }
+
+            if (assets.Count == 0)
             {
                 return;
             }
 
             var window = GetWindow<GitQuickCommitWindow>();
             window.titleContent = new GUIContent(WindowTitle);
-            window.minSize = new Vector2(1040, 700);
+            window.minSize = new Vector2(1040, 600);
             window.maxSize = new Vector2(1040, 1080);
-            window.Initialize(obj);
+            window.Initialize(assets);
             window.Show();
         }
 
         [MenuItem("Assets/\u5feb\u6377Git\u63d0\u4ea4", true)]
         private static bool ValidateOpenFromContext()
         {
-            var obj = Selection.activeObject;
-            if (obj == null)
+            var objects = Selection.objects;
+            if (objects == null || objects.Length == 0)
             {
                 return false;
             }
 
-            var path = AssetDatabase.GetAssetPath(obj);
-            if (string.IsNullOrEmpty(path))
+            foreach (var obj in objects)
             {
-                return false;
+                if (obj == null)
+                {
+                    continue;
+                }
+
+                var path = AssetDatabase.GetAssetPath(obj);
+                if (!string.IsNullOrEmpty(path))
+                {
+                    return true;
+                }
             }
 
-            return true;
+            return false;
         }
 
         [MenuItem("GameObject/\u5feb\u6377Git\u63d0\u4ea4", false, 2000)]
         private static void OpenFromGameObject(MenuCommand command)
         {
-            var go = Selection.activeGameObject;
-            var asset = ResolveAssetFromGameObject(go);
-            if (asset == null)
+            var gameObjects = Selection.gameObjects;
+            if (gameObjects == null || gameObjects.Length == 0)
             {
                 return;
             }
 
+            var assets = new List<UnityEngine.Object>();
+            foreach (var go in gameObjects)
+            {
+                var asset = ResolvePrefabAssetFromGameObject(go);
+                if (asset != null)
+                {
+                    assets.Add(asset);
+                }
+            }
+
+            if (assets.Count == 0)
+            {
+                foreach (var go in gameObjects)
+                {
+                    var asset = ResolveSceneAssetFromGameObject(go);
+                    if (asset != null)
+                    {
+                        assets.Add(asset);
+                    }
+                }
+
+                if (assets.Count == 0)
+                {
+                    return;
+                }
+            }
+
             var window = GetWindow<GitQuickCommitWindow>();
             window.titleContent = new GUIContent(WindowTitle);
-            window.minSize = new Vector2(600, 500);
-            window.Initialize(asset);
+            window.minSize = new Vector2(1040, 600);
+            window.maxSize = new Vector2(1040, 1080);
+            window.Initialize(assets);
             window.Show();
         }
 
         [MenuItem("GameObject/\u5feb\u6377Git\u63d0\u4ea4", true)]
         private static bool ValidateOpenFromGameObject(MenuCommand command)
         {
-            var go = Selection.activeGameObject;
-            return ResolveAssetFromGameObject(go) != null;
+            var gameObjects = Selection.gameObjects;
+            if (gameObjects == null || gameObjects.Length == 0)
+            {
+                return false;
+            }
+
+            foreach (var go in gameObjects)
+            {
+                if (ResolvePrefabAssetFromGameObject(go) != null || ResolveSceneAssetFromGameObject(go) != null)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
-        private static UnityEngine.Object ResolveAssetFromGameObject(GameObject go)
+        private static UnityEngine.Object ResolvePrefabAssetFromGameObject(GameObject go)
         {
             if (go == null)
             {
                 return null;
             }
 
-            // 1. 直接获取 GameObject 对应的资源路径
-            var directPath = AssetDatabase.GetAssetPath(go);
-            if (!string.IsNullOrEmpty(directPath))
-            {
-                return AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(directPath);
-            }
-
-            // 2. Prefab 实例 -> Prefab 资源
             var prefabPath = PrefabUtility.GetPrefabAssetPathOfNearestInstanceRoot(go);
             if (!string.IsNullOrEmpty(prefabPath))
             {
                 return AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(prefabPath);
             }
 
-            // 3. 场景对象 -> 场景资源
+            return null;
+        }
+
+        private static UnityEngine.Object ResolveSceneAssetFromGameObject(GameObject go)
+        {
+            if (go == null)
+            {
+                return null;
+            }
+
             var scenePath = go.scene.path;
             if (!string.IsNullOrEmpty(scenePath))
             {
@@ -210,18 +284,235 @@ namespace OneKey.GitTools
             return null;
         }
 
-        private void Initialize(UnityEngine.Object asset)
+        private void Initialize(IEnumerable<UnityEngine.Object> assets)
         {
-            targetAsset = asset;
             excludedPaths.Clear();
-            GitUtility.SetContextAssetPath(AssetDatabase.GetAssetPath(asset));
+            SetTargetAssets(assets);
             RefreshData();
+        }
+
+        private static List<UnityEngine.Object> GetTargetsFromCurrentSelection()
+        {
+            var targets = new List<UnityEngine.Object>();
+
+            var objects = Selection.objects;
+            if (objects != null && objects.Length > 0)
+            {
+                foreach (var obj in objects)
+                {
+                    if (obj == null)
+                    {
+                        continue;
+                    }
+
+                    var path = AssetDatabase.GetAssetPath(obj);
+                    if (string.IsNullOrEmpty(path))
+                    {
+                        continue;
+                    }
+
+                    targets.Add(obj);
+                }
+            }
+
+            var gameObjects = Selection.gameObjects;
+            if (gameObjects != null && gameObjects.Length > 0)
+            {
+                foreach (var go in gameObjects)
+                {
+                    var prefab = ResolvePrefabAssetFromGameObject(go);
+                    if (prefab != null)
+                    {
+                        targets.Add(prefab);
+                    }
+                }
+
+                if (targets.Count == 0)
+                {
+                    foreach (var go in gameObjects)
+                    {
+                        var scene = ResolveSceneAssetFromGameObject(go);
+                        if (scene != null)
+                        {
+                            targets.Add(scene);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            return targets;
+        }
+
+        private void SetTargetAssets(IEnumerable<UnityEngine.Object> assets)
+        {
+            targetAssetPaths.Clear();
+            targetFolderPrefixes.Clear();
+
+            if (assets == null)
+            {
+                targetAsset = null;
+                targetAssetPath = string.Empty;
+                GitUtility.SetContextAssetPath(null);
+                return;
+            }
+
+            var uniquePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            UnityEngine.Object singleAsset = null;
+
+            foreach (var asset in assets)
+            {
+                if (asset == null)
+                {
+                    continue;
+                }
+
+                var path = GitUtility.NormalizeAssetPath(AssetDatabase.GetAssetPath(asset));
+                if (string.IsNullOrEmpty(path))
+                {
+                    continue;
+                }
+
+                if (!uniquePaths.Add(path))
+                {
+                    continue;
+                }
+
+                targetAssetPaths.Add(path);
+                if (singleAsset == null)
+                {
+                    singleAsset = asset;
+                }
+            }
+
+            if (targetAssetPaths.Count == 1)
+            {
+                targetAsset = singleAsset;
+                targetAssetPath = targetAssetPaths[0];
+                GitUtility.SetContextAssetPath(targetAssetPath);
+                return;
+            }
+
+            targetAsset = null;
+            targetAssetPath = string.Empty;
+            GitUtility.SetContextAssetPath(targetAssetPaths.Count == 0 ? null : GetCommonContextAssetPath(targetAssetPaths));
+        }
+
+        private static string GetCommonContextAssetPath(IReadOnlyList<string> unityAssetPaths)
+        {
+            if (unityAssetPaths == null || unityAssetPaths.Count == 0)
+            {
+                return null;
+            }
+
+            var folders = new List<string>(unityAssetPaths.Count);
+            foreach (var path in unityAssetPaths)
+            {
+                var normalized = GitUtility.NormalizeAssetPath(path);
+                if (string.IsNullOrEmpty(normalized))
+                {
+                    continue;
+                }
+
+                if (AssetDatabase.IsValidFolder(normalized))
+                {
+                    folders.Add(normalized);
+                    continue;
+                }
+
+                var dir = GetFolderPath(normalized);
+                folders.Add(string.IsNullOrEmpty(dir) ? "Assets" : dir);
+            }
+
+            if (folders.Count == 0)
+            {
+                return "Assets";
+            }
+
+            var common = folders[0];
+            for (var i = 1; i < folders.Count; i++)
+            {
+                common = GetCommonPathPrefix(common, folders[i]);
+                if (string.IsNullOrEmpty(common) || common.Equals("Assets", StringComparison.OrdinalIgnoreCase))
+                {
+                    return "Assets";
+                }
+            }
+
+            return string.IsNullOrEmpty(common) ? "Assets" : common;
+        }
+
+        private static string GetCommonPathPrefix(string left, string right)
+        {
+            if (string.IsNullOrEmpty(left) || string.IsNullOrEmpty(right))
+            {
+                return "Assets";
+            }
+
+            left = GitUtility.NormalizeAssetPath(left);
+            right = GitUtility.NormalizeAssetPath(right);
+
+            var leftParts = left.Split('/');
+            var rightParts = right.Split('/');
+
+            var count = Math.Min(leftParts.Length, rightParts.Length);
+            var matched = 0;
+            for (var i = 0; i < count; i++)
+            {
+                if (!string.Equals(leftParts[i], rightParts[i], StringComparison.OrdinalIgnoreCase))
+                {
+                    break;
+                }
+
+                matched++;
+            }
+
+            if (matched <= 0)
+            {
+                return "Assets";
+            }
+
+            var prefix = string.Join("/", leftParts.Take(matched));
+            return string.IsNullOrEmpty(prefix) ? "Assets" : prefix;
         }
 
         private void OnEnable()
         {
             // For domain reload / layout reload, rebuild UI
             CreateGUI();
+
+            // When the window is restored by Unity (layout/domain reload), re-initialize from current selection.
+            // Never fall back to "show all repo changes" by default.
+            EditorApplication.delayCall += () =>
+            {
+                if (this == null)
+                {
+                    return;
+                }
+
+                if (refreshInProgress || gitOperationInProgress)
+                {
+                    return;
+                }
+
+                if (targetAssetPaths.Count == 0)
+                {
+                    SetTargetAssets(GetTargetsFromCurrentSelection());
+                }
+
+                if (targetAssetPaths.Count > 0)
+                {
+                    RefreshData();
+                }
+                else
+                {
+                    assetInfos.Clear();
+                    statusMessage = "请先在 Project 或 Hierarchy 选择目标资源，再打开窗口（或在顶部“目标资源”里选择）。";
+                    UpdateHeaderLabels();
+                    RefreshListViews();
+                    ForceRepaintUI();
+                }
+            };
         }
 
         private void OnDisable()
@@ -257,6 +548,36 @@ namespace OneKey.GitTools
             // UI 完全使用 UI Toolkit 构建，如需 IMGUI 可在此扩展。
         }
 
+        private void ForceRepaintUI()
+        {
+            EditorApplication.QueuePlayerLoopUpdate();
+            rootVisualElement?.MarkDirtyRepaint();
+            Repaint();
+        }
+
+        private void RequestAssetDatabaseRefreshAndRefreshData()
+        {
+            EditorApplication.delayCall += () =>
+            {
+                if (this == null)
+                {
+                    return;
+                }
+
+                try
+                {
+                    AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[GitQuickCommit] AssetDatabase.Refresh failed: {ex.Message}");
+                }
+
+                RefreshData();
+                ForceRepaintUI();
+            };
+        }
+
         private void ShowTempNotification(string message, float seconds = 2f)
         {
             if (string.IsNullOrEmpty(message))
@@ -287,9 +608,8 @@ namespace OneKey.GitTools
                 targetField.value = targetAsset;
                 targetField.RegisterValueChangedCallback(evt =>
                 {
-                    targetAsset = evt.newValue;
                     excludedPaths.Clear();
-                    GitUtility.SetContextAssetPath(targetAsset != null ? AssetDatabase.GetAssetPath(targetAsset) : null);
+                    SetTargetAssets(evt.newValue != null ? new[] { evt.newValue } : null);
                     RefreshData();
                 });
             }
@@ -538,7 +858,7 @@ namespace OneKey.GitTools
                 statusMessage = "刷新已取消。";
                 UpdateHeaderLabels();
                 UpdateCommitButtonsEnabled();
-                Repaint();
+                ForceRepaintUI();
                 return;
             }
 
@@ -548,7 +868,7 @@ namespace OneKey.GitTools
                 statusMessage = $"刷新失败：{error}";
                 UpdateHeaderLabels();
                 UpdateCommitButtonsEnabled();
-                Repaint();
+                ForceRepaintUI();
                 return;
             }
 
@@ -769,6 +1089,14 @@ namespace OneKey.GitTools
                 {
                     requests.Add(new GitUtility.GitStageRequest(gitPath, info.ChangeType));
                 }
+
+                if (info.ChangeType == GitChangeType.Renamed &&
+                    !string.IsNullOrEmpty(info.OriginalPath) &&
+                    !string.Equals(info.OriginalPath, info.AssetPath, StringComparison.OrdinalIgnoreCase) &&
+                    GitUtility.TryGetGitRelativePath(info.OriginalPath, out var originalGitPath))
+                {
+                    requests.Add(new GitUtility.GitStageRequest(originalGitPath, GitChangeType.Deleted));
+                }
             }
 
             if (requests.Count == 0)
@@ -784,7 +1112,7 @@ namespace OneKey.GitTools
 
             statusMessage = "正在发送至待提交...";
             UpdateHeaderLabels();
-            Repaint();
+            ForceRepaintUI();
 
             gitOperationTask = Task.Run(() =>
             {
@@ -834,6 +1162,14 @@ namespace OneKey.GitTools
                 {
                     requests.Add(gitPath);
                 }
+
+                if (info.ChangeType == GitChangeType.Renamed &&
+                    !string.IsNullOrEmpty(info.OriginalPath) &&
+                    !string.Equals(info.OriginalPath, info.AssetPath, StringComparison.OrdinalIgnoreCase) &&
+                    GitUtility.TryGetGitRelativePath(info.OriginalPath, out var originalGitPath))
+                {
+                    requests.Add(originalGitPath);
+                }
             }
 
             if (requests.Count == 0)
@@ -849,7 +1185,7 @@ namespace OneKey.GitTools
 
             statusMessage = "正在从待提交移出...";
             UpdateHeaderLabels();
-            Repaint();
+            ForceRepaintUI();
 
             gitOperationTask = Task.Run(() =>
             {
@@ -882,13 +1218,14 @@ namespace OneKey.GitTools
                         continue;
                     }
 
-                    if (!IsRelevantForCurrentTarget(info.AssetPath))
+                    if (!IsRelevantForCurrentTarget(info))
                     {
                         continue;
                     }
                 }
 
-                if (excludedPaths.Contains(info.AssetPath))
+                if (excludedPaths.Contains(info.AssetPath) ||
+                    (!string.IsNullOrEmpty(info.OriginalPath) && excludedPaths.Contains(info.OriginalPath)))
                 {
                     continue;
                 }
@@ -979,36 +1316,40 @@ namespace OneKey.GitTools
                 return;
             }
 
-            refreshInProgress = true;
-            UpdateActionButtonsEnabled();
-            UpdateCommitButtonsEnabled();
-
             assetInfos.Clear();
             statusMessage = string.Empty;
             selectedUnstagedPaths.Clear();
             selectedStagedPaths.Clear();
             HideHistoryDropdown();
             relevantPaths.Clear();
-            selectedTargetIsFolder = false;
-            targetFolderPrefix = null;
+            targetFolderPrefixes.Clear();
 
             var infoMessages = new List<string>();
 
-            if (targetAsset == null)
+            if (targetAssetPaths.Count == 0)
             {
                 targetAssetPath = string.Empty;
                 GitUtility.SetContextAssetPath(null);
-                infoMessages.Add("\u672a\u9009\u62e9\u8d44\u6e90\uff0c\u5c06\u663e\u793a\u5168\u90e8\u53d8\u66f4\u3002");
+                statusMessage = "请先在 Project 或 Hierarchy 选择目标资源，再打开窗口（或在顶部“目标资源”里选择）。";
+                UpdateHeaderLabels();
+                RefreshListViews();
+                ForceRepaintUI();
+                return;
             }
             else
             {
-                targetAssetPath = GitUtility.NormalizeAssetPath(AssetDatabase.GetAssetPath(targetAsset));
-                GitUtility.SetContextAssetPath(targetAssetPath);
-                if (string.IsNullOrEmpty(targetAssetPath))
+                GitUtility.SetContextAssetPath(GetCommonContextAssetPath(targetAssetPaths));
+                targetAssetPath = targetAssetPaths.Count == 1 ? targetAssetPaths[0] : string.Empty;
+
+                if (targetAssetPaths.Count == 1 && string.IsNullOrEmpty(targetAssetPath))
                 {
                     infoMessages.Add("\u65e0\u6cd5\u89e3\u6790\u8d44\u6e90\u8def\u5f84\u3002");
                 }
             }
+
+            refreshInProgress = true;
+            UpdateActionButtonsEnabled();
+            UpdateCommitButtonsEnabled();
 
             var gitRoot = GitUtility.ProjectRoot;
             if (string.IsNullOrEmpty(gitRoot))
@@ -1021,7 +1362,7 @@ namespace OneKey.GitTools
                 statusMessage = infoMessages.Count > 0 ? string.Join("\n", infoMessages) : string.Empty;
                 UpdateHeaderLabels();
                 RefreshListViews();
-                Repaint();
+                ForceRepaintUI();
                 return;
             }
 
@@ -1031,7 +1372,7 @@ namespace OneKey.GitTools
             statusMessage = "正在刷新 Git 状态...";
             UpdateHeaderLabels();
             RefreshListViews();
-            Repaint();
+            ForceRepaintUI();
 
             refreshTask = Task.Run(() => GitUtility.GetWorkingTreeChanges() ?? new List<GitChangeEntry>());
             refreshTask.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
@@ -1045,7 +1386,7 @@ namespace OneKey.GitTools
             {
                 infoMessages.Add("Git 未检测到任何变更。");
             }
-            else if (targetAsset != null && !string.IsNullOrEmpty(targetAssetPath))
+            else if (targetAssetPaths.Count > 0)
             {
                 UpdateTargetSelectionInfo(gitChanges);
             }
@@ -1053,11 +1394,13 @@ namespace OneKey.GitTools
             assetInfos.Clear();
             foreach (var change in gitChanges)
             {
-                var lastTime = GitUtility.GetLastKnownChangeTime(change.Path);
-                assetInfos.Add(new GitAssetInfo(change.Path, change.ChangeType, lastTime, change.WorkingTreeTime, change.IsStaged, change.IsUnstaged));
+                var historyPath = string.IsNullOrEmpty(change.OriginalPath) ? change.Path : change.OriginalPath;
+                var lastTime = GitUtility.GetLastKnownChangeTime(historyPath);
+                assetInfos.Add(new GitAssetInfo(change.Path, change.OriginalPath, change.ChangeType, lastTime, change.WorkingTreeTime, change.IsStaged, change.IsUnstaged));
             }
 
             assetInfos.Sort((a, b) => string.Compare(a.AssetPath, b.AssetPath, StringComparison.OrdinalIgnoreCase));
+            CaptureInitialStagedSnapshotIfNeeded();
 
             if (targetField != null)
             {
@@ -1066,7 +1409,7 @@ namespace OneKey.GitTools
 
             UpdateRepositoryStatusInfo();
 
-            if (targetAsset != null && !string.IsNullOrEmpty(targetAssetPath))
+            if (targetAssetPaths.Count > 0)
             {
                 var hasRelevantUnstaged = EnumerateFilteredAssets(false).Any();
                 if (!hasRelevantUnstaged && gitChanges.Count > 0)
@@ -1079,7 +1422,17 @@ namespace OneKey.GitTools
             UpdateHeaderLabels();
             UpdateCommitButtonsEnabled();
             RefreshListViews();
-            Repaint();
+            ForceRepaintUI();
+        }
+
+        private void CaptureInitialStagedSnapshotIfNeeded()
+        {
+            if (initialStagedPaths != null)
+            {
+                return;
+            }
+
+            initialStagedPaths = new HashSet<string>(assetInfos.Where(a => a.IsStaged).Select(a => a.AssetPath), StringComparer.OrdinalIgnoreCase);
         }
 
         private void SendVisibleChangesToStage()
@@ -1124,6 +1477,8 @@ namespace OneKey.GitTools
             }
 
             EnsureCommitHistoryLoaded();
+            RefreshFallbackCommitHistory();
+            RebuildCommitHistoryDisplay();
             if (!HasCommitHistory())
             {
                 EditorUtility.DisplayDialog("提交记录", "暂无提交记录", "确定");
@@ -1217,7 +1572,7 @@ namespace OneKey.GitTools
             }
             UpdateCommitButtonsEnabled();
             HideHistoryDropdown();
-            Repaint();
+            ForceRepaintUI();
         }
 
         private void EnsureCommitHistoryLoaded()
@@ -1229,73 +1584,152 @@ namespace OneKey.GitTools
 
             commitHistory = new List<string>();
             var path = GetCommitHistoryFilePath();
-            if (!File.Exists(path))
-            {
-                LoadCommitHistoryFromGitFallback();
-                return;
-            }
+            savedCommitHistory = new List<string>();
+            fallbackCommitHistory = new List<string>();
 
-            string json;
-            try
+            if (File.Exists(path))
             {
-                json = File.ReadAllText(path);
-            }
-            catch (Exception ex)
-            {
-                Debug.LogWarning($"GitQuickCommit: 读取提交记录失败: {ex.Message}");
-                return;
-            }
-
-            if (string.IsNullOrWhiteSpace(json))
-            {
-                return;
-            }
-
-            try
-            {
-                var data = JsonUtility.FromJson<CommitHistoryData>(json);
-                if (data?.entries != null)
+                string json;
+                try
                 {
-                    foreach (var entry in data.entries)
+                    json = File.ReadAllText(path);
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"GitQuickCommit: 读取提交记录失败: {ex.Message}");
+                    json = null;
+                }
+
+                if (!string.IsNullOrWhiteSpace(json))
+                {
+                    try
                     {
-                        if (!string.IsNullOrWhiteSpace(entry))
+                        var data = JsonUtility.FromJson<CommitHistoryData>(json);
+                        if (data?.entries != null)
                         {
-                            commitHistory.Add(entry.Trim());
+                            foreach (var entry in data.entries)
+                            {
+                                if (!string.IsNullOrWhiteSpace(entry))
+                                {
+                                    savedCommitHistory.Add(entry.Trim());
+                                }
+                            }
                         }
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.LogWarning($"GitQuickCommit: 解析提交记录失败: {ex.Message}");
+                        savedCommitHistory.Clear();
                     }
                 }
             }
-            catch (Exception ex)
-            {
-                Debug.LogWarning($"GitQuickCommit: 解析提交记录失败: {ex.Message}");
-                commitHistory.Clear();
-            }
 
-            if (commitHistory.Count == 0)
-            {
-                LoadCommitHistoryFromGitFallback();
-            }
+            RefreshFallbackCommitHistory();
+            FilterSavedCommitHistoryToCurrentUser();
+            RebuildCommitHistoryDisplay();
         }
 
-        private void LoadCommitHistoryFromGitFallback()
+        private void RefreshFallbackCommitHistory()
         {
             try
             {
-                var gitMessages = GitUtility.GetRecentCommitMessages(MaxCommitHistoryEntries);
-                if (gitMessages != null && gitMessages.Count > 0)
-                {
-                    commitHistory.AddRange(gitMessages);
-                }
+                fallbackCommitHistory = GitUtility.GetRecentCommitMessagesForCurrentUser(MaxCommitHistoryEntries) ?? new List<string>();
             }
             catch (Exception ex)
             {
+                fallbackCommitHistory = new List<string>();
                 Debug.LogWarning($"GitQuickCommit: 读取Git提交记录失败: {ex.Message}");
+            }
+        }
+
+        private void FilterSavedCommitHistoryToCurrentUser()
+        {
+            if (savedCommitHistory == null || savedCommitHistory.Count == 0)
+            {
+                return;
+            }
+
+            List<string> myMessages;
+            try
+            {
+                myMessages = GitUtility.GetRecentCommitMessagesForCurrentUser(500);
+            }
+            catch
+            {
+                myMessages = null;
+            }
+
+            if (myMessages == null || myMessages.Count == 0)
+            {
+                Debug.LogWarning("GitQuickCommit: 未找到当前用户的提交记录（可能未配置 git user.email/user.name），无法过滤本地历史文件。");
+                return;
+            }
+
+            var mine = new HashSet<string>(myMessages, StringComparer.Ordinal);
+            savedCommitHistory.RemoveAll(entry => !mine.Contains(entry));
+            if (savedCommitHistory.Count > MaxCommitHistoryEntries)
+            {
+                savedCommitHistory.RemoveRange(MaxCommitHistoryEntries, savedCommitHistory.Count - MaxCommitHistoryEntries);
+            }
+        }
+
+        private void RebuildCommitHistoryDisplay()
+        {
+            if (commitHistory == null)
+            {
+                return;
+            }
+
+            commitHistory.Clear();
+
+            if (savedCommitHistory != null)
+            {
+                foreach (var entry in savedCommitHistory)
+                {
+                    if (string.IsNullOrWhiteSpace(entry))
+                    {
+                        continue;
+                    }
+
+                    if (commitHistory.Count >= MaxCommitHistoryEntries)
+                    {
+                        return;
+                    }
+
+                    commitHistory.Add(entry.Trim());
+                }
+            }
+
+            if (fallbackCommitHistory == null || fallbackCommitHistory.Count == 0)
+            {
+                return;
+            }
+
+            var existing = new HashSet<string>(commitHistory, StringComparer.Ordinal);
+            foreach (var entry in fallbackCommitHistory)
+            {
+                if (string.IsNullOrWhiteSpace(entry))
+                {
+                    continue;
+                }
+
+                var trimmed = entry.Trim();
+                if (existing.Contains(trimmed))
+                {
+                    continue;
+                }
+
+                commitHistory.Add(trimmed);
+                if (commitHistory.Count >= MaxCommitHistoryEntries)
+                {
+                    return;
+                }
             }
         }
 
         private void SaveCommitHistory()
         {
-            if (commitHistory == null)
+            if (savedCommitHistory == null)
             {
                 return;
             }
@@ -1309,7 +1743,7 @@ namespace OneKey.GitTools
                     Directory.CreateDirectory(directory);
                 }
 
-                if (commitHistory.Count == 0)
+                if (savedCommitHistory.Count == 0)
                 {
                     if (File.Exists(path))
                     {
@@ -1319,7 +1753,7 @@ namespace OneKey.GitTools
                     return;
                 }
 
-                var data = new CommitHistoryData { entries = commitHistory };
+                var data = new CommitHistoryData { entries = savedCommitHistory };
                 var json = JsonUtility.ToJson(data);
                 File.WriteAllText(path, json);
             }
@@ -1338,14 +1772,16 @@ namespace OneKey.GitTools
 
             EnsureCommitHistoryLoaded();
             var trimmed = message.Trim();
-            commitHistory.RemoveAll(entry => string.Equals(entry, trimmed, StringComparison.Ordinal));
-            commitHistory.Insert(0, trimmed);
-            if (commitHistory.Count > MaxCommitHistoryEntries)
+            savedCommitHistory ??= new List<string>();
+            savedCommitHistory.RemoveAll(entry => string.Equals(entry, trimmed, StringComparison.Ordinal));
+            savedCommitHistory.Insert(0, trimmed);
+            if (savedCommitHistory.Count > MaxCommitHistoryEntries)
             {
-                commitHistory.RemoveRange(MaxCommitHistoryEntries, commitHistory.Count - MaxCommitHistoryEntries);
+                savedCommitHistory.RemoveRange(MaxCommitHistoryEntries, savedCommitHistory.Count - MaxCommitHistoryEntries);
             }
 
             SaveCommitHistory();
+            RebuildCommitHistoryDisplay();
             UpdateHistoryButtonState();
             if (historyDropdownVisible && historyListView != null)
             {
@@ -1379,6 +1815,34 @@ namespace OneKey.GitTools
                 return;
             }
 
+            CaptureInitialStagedSnapshotIfNeeded();
+            var stagedPathsNow = assetInfos.Where(a => a.IsStaged).Select(a => a.AssetPath).ToList();
+            var preexistingStagedCount = 0;
+            if (initialStagedPaths != null && stagedPathsNow.Count > 0)
+            {
+                foreach (var path in stagedPathsNow)
+                {
+                    if (initialStagedPaths.Contains(path))
+                    {
+                        preexistingStagedCount++;
+                    }
+                }
+            }
+
+            if (preexistingStagedCount > 0)
+            {
+                var confirmed = EditorUtility.DisplayDialog(
+                    "安全确认",
+                    $"将提交 {stagedPathsNow.Count} 个待提交条目，其中 {preexistingStagedCount} 个在打开窗口前就已暂存。\n\n是否继续提交？",
+                    "继续提交",
+                    "取消");
+
+                if (!confirmed)
+                {
+                    return;
+                }
+            }
+
             gitOperationInProgress = true;
             gitOperationKind = pushAfter ? GitOperationKind.CommitAndPush : GitOperationKind.Commit;
             UpdateActionButtonsEnabled();
@@ -1386,7 +1850,7 @@ namespace OneKey.GitTools
 
             statusMessage = pushAfter ? "正在提交并推送..." : "正在提交...";
             UpdateHeaderLabels();
-            Repaint();
+            ForceRepaintUI();
 
             gitOperationTask = Task.Run(() =>
             {
@@ -1419,9 +1883,18 @@ namespace OneKey.GitTools
         {
             if (pathLabel != null)
             {
-                pathLabel.text = string.IsNullOrEmpty(targetAssetPath)
-                    ? "路径：未选择（显示全部）"
-                    : $"路径：{targetAssetPath}";
+                if (targetAssetPaths.Count == 0)
+                {
+                    pathLabel.text = "路径：未选择（不显示变更）";
+                }
+                else if (targetAssetPaths.Count == 1)
+                {
+                    pathLabel.text = $"路径：{targetAssetPaths[0]}";
+                }
+                else
+                {
+                    pathLabel.text = $"路径：已选择 {targetAssetPaths.Count} 个目标（显示关联变更）";
+                }
             }
 
             if (statusLabel != null)
@@ -1665,11 +2138,15 @@ namespace OneKey.GitTools
             pathRow.style.flexDirection = FlexDirection.Row;
             pathRow.style.alignItems = Align.Center;
 
-            var displayPath = info.AssetPath ?? string.Empty;
-            var lastSlash = displayPath.LastIndexOf('/');
-            if (lastSlash > 0)
+            var displayPath = GetFolderPath(info.AssetPath);
+            if (!string.IsNullOrEmpty(info.OriginalPath))
             {
-                displayPath = displayPath.Substring(0, lastSlash);
+                var originalFolder = GetFolderPath(info.OriginalPath);
+                if (!string.IsNullOrEmpty(originalFolder) &&
+                    !string.Equals(originalFolder, displayPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    displayPath = $"{originalFolder} -> {displayPath}";
+                }
             }
 
             var pathInfoLabel = new Label(displayPath);
@@ -1733,7 +2210,7 @@ namespace OneKey.GitTools
             var success = GitUtility.DiscardChanges(new[] { info }, out var summary);
             if (success)
             {
-                RefreshData();
+                RequestAssetDatabaseRefreshAndRefreshData();
                 ShowTempNotification(string.IsNullOrEmpty(summary) ? "\u5df2\u653e\u5f03\u66f4\u6539\u3002" : summary);
             }
             else
@@ -1764,63 +2241,106 @@ namespace OneKey.GitTools
             }
         }
 
-        private bool IsRelevantForCurrentTarget(string assetPath)
+        private bool IsRelevantForCurrentTarget(GitAssetInfo info)
         {
-            if (string.IsNullOrEmpty(targetAssetPath))
+            if (info == null)
+            {
+                return false;
+            }
+
+            if (targetAssetPaths.Count == 0)
             {
                 return true;
             }
 
-            if (selectedTargetIsFolder)
-            {
-                if (!string.IsNullOrEmpty(targetFolderPrefix) &&
-                    assetPath.StartsWith(targetFolderPrefix, StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
+            var assetPath = info.AssetPath ?? string.Empty;
+            var originalPath = info.OriginalPath ?? string.Empty;
 
-                return relevantPaths.Contains(assetPath);
+            if (targetFolderPrefixes.Count > 0)
+            {
+                foreach (var prefix in targetFolderPrefixes)
+                {
+                    if (string.IsNullOrEmpty(prefix))
+                    {
+                        continue;
+                    }
+
+                    if (assetPath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ||
+                        originalPath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+                }
             }
 
             if (relevantPaths.Count == 0)
             {
-                return string.Equals(assetPath, targetAssetPath, StringComparison.OrdinalIgnoreCase);
+                foreach (var target in targetAssetPaths)
+                {
+                    if (string.Equals(assetPath, target, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(originalPath, target, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
             }
 
-            return relevantPaths.Contains(assetPath);
+            return relevantPaths.Contains(assetPath) || relevantPaths.Contains(originalPath);
         }
 
         private void UpdateTargetSelectionInfo(IReadOnlyList<GitChangeEntry> currentChanges)
         {
             relevantPaths.Clear();
-            selectedTargetIsFolder = AssetDatabase.IsValidFolder(targetAssetPath);
-            if (selectedTargetIsFolder)
-            {
-                targetFolderPrefix = targetAssetPath.EndsWith("/")
-                    ? targetAssetPath
-                    : $"{targetAssetPath}/";
-                AddRelevantPath(targetAssetPath);
-                return;
-            }
+            targetFolderPrefixes.Clear();
 
-            targetFolderPrefix = null;
-            AddRelevantPath(targetAssetPath);
-
-            var dependencies = AssetDatabase.GetDependencies(targetAssetPath, true);
-            if (dependencies == null || dependencies.Length == 0)
+            var normalizedTargets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var rawTarget in targetAssetPaths)
             {
-                AddAncestorFolderMetas(targetAssetPath);
-                AddReverseDependenciesFromChanges(currentChanges);
-                return;
-            }
+                var normalized = GitUtility.NormalizeAssetPath(rawTarget);
+                if (string.IsNullOrEmpty(normalized))
+                {
+                    continue;
+                }
 
-            foreach (var dep in dependencies)
-            {
-                AddRelevantPath(dep);
+                if (AssetDatabase.IsValidFolder(normalized))
+                {
+                    var prefix = normalized.EndsWith("/")
+                        ? normalized
+                        : $"{normalized}/";
+                    targetFolderPrefixes.Add(prefix);
+                    AddRelevantPath(normalized);
+                    continue;
+                }
+
+                normalizedTargets.Add(normalized);
+                AddRelevantPath(normalized);
+
+                string[] dependencies;
+                try
+                {
+                    dependencies = AssetDatabase.GetDependencies(normalized, true);
+                }
+                catch
+                {
+                    dependencies = null;
+                }
+
+                if (dependencies == null || dependencies.Length == 0)
+                {
+                    AddAncestorFolderMetas(normalized);
+                    continue;
+                }
+
+                foreach (var dep in dependencies)
+                {
+                    AddRelevantPath(dep);
+                }
             }
 
             AddAncestorFolderMetasForCurrentRelevantPaths();
-            AddReverseDependenciesFromChanges(currentChanges);
+            AddReverseDependenciesFromChanges(currentChanges, normalizedTargets);
         }
 
         private void AddRelevantPath(string path)
@@ -1877,20 +2397,14 @@ namespace OneKey.GitTools
             }
         }
 
-        private void AddReverseDependenciesFromChanges(IReadOnlyList<GitChangeEntry> currentChanges)
+        private void AddReverseDependenciesFromChanges(IReadOnlyList<GitChangeEntry> currentChanges, HashSet<string> normalizedTargets)
         {
             if (currentChanges == null || currentChanges.Count == 0)
             {
                 return;
             }
 
-            if (string.IsNullOrEmpty(targetAssetPath))
-            {
-                return;
-            }
-
-            var target = GitUtility.NormalizeAssetPath(targetAssetPath);
-            if (string.IsNullOrEmpty(target))
+            if (normalizedTargets == null || normalizedTargets.Count == 0)
             {
                 return;
             }
@@ -1904,11 +2418,6 @@ namespace OneKey.GitTools
                 }
 
                 if (changedPath.EndsWith(".meta", StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                if (string.Equals(changedPath, target, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
@@ -1938,14 +2447,27 @@ namespace OneKey.GitTools
                     continue;
                 }
 
-                var referencesTarget = deps.Any(d => string.Equals(GitUtility.NormalizeAssetPath(d), target, StringComparison.OrdinalIgnoreCase));
-                if (!referencesTarget)
+                var referencesTarget = false;
+                foreach (var dep in deps)
                 {
-                    continue;
+                    var normalizedDep = GitUtility.NormalizeAssetPath(dep);
+                    if (string.IsNullOrEmpty(normalizedDep))
+                    {
+                        continue;
+                    }
+
+                    if (normalizedTargets.Contains(normalizedDep))
+                    {
+                        referencesTarget = true;
+                        break;
+                    }
                 }
 
-                AddRelevantPath(changedPath);
-                AddAncestorFolderMetas(changedPath);
+                if (referencesTarget)
+                {
+                    AddRelevantPath(changedPath);
+                    AddAncestorFolderMetas(changedPath);
+                }
             }
         }
 
@@ -2002,6 +2524,17 @@ namespace OneKey.GitTools
         private static string FormatDateTime(DateTime value)
         {
             return value.ToString("yyyy-MM-dd HH:mm");
+        }
+
+        private static string GetFolderPath(string assetPath)
+        {
+            if (string.IsNullOrEmpty(assetPath))
+            {
+                return string.Empty;
+            }
+
+            var lastSlash = assetPath.LastIndexOf('/');
+            return lastSlash > 0 ? assetPath.Substring(0, lastSlash) : assetPath;
         }
 
         private static string GetCommitHistoryFilePath()

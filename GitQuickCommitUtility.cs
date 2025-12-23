@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
@@ -39,15 +40,17 @@ namespace OneKey.GitTools
     internal class GitAssetInfo
     {
         public string AssetPath;
+        public string OriginalPath;
         public GitChangeType ChangeType;
         public DateTime? LastCommitTime;
         public DateTime? WorkingTreeTime;
         public bool IsStaged;
         public bool IsUnstaged;
 
-        public GitAssetInfo(string path, GitChangeType type, DateTime? lastTime, DateTime? workingTime, bool isStaged, bool isUnstaged)
+        public GitAssetInfo(string path, string originalPath, GitChangeType type, DateTime? lastTime, DateTime? workingTime, bool isStaged, bool isUnstaged)
         {
             AssetPath = path;
+            OriginalPath = originalPath;
             ChangeType = type;
             LastCommitTime = lastTime;
             WorkingTreeTime = workingTime;
@@ -61,14 +64,16 @@ namespace OneKey.GitTools
     internal readonly struct GitChangeEntry
     {
         public readonly string Path;
+        public readonly string OriginalPath;
         public readonly GitChangeType ChangeType;
         public readonly DateTime? WorkingTreeTime;
         public readonly bool IsStaged;
         public readonly bool IsUnstaged;
 
-        public GitChangeEntry(string path, GitChangeType type, DateTime? workingTreeTime, bool isStaged, bool isUnstaged)
+        public GitChangeEntry(string path, string originalPath, GitChangeType type, DateTime? workingTreeTime, bool isStaged, bool isUnstaged)
         {
             Path = path;
+            OriginalPath = originalPath;
             ChangeType = type;
             WorkingTreeTime = workingTreeTime;
             IsStaged = isStaged;
@@ -193,7 +198,7 @@ namespace OneKey.GitTools
 
             // Use --untracked-files=all so untracked directories are expanded into files;
             // otherwise Git may collapse them as "?? someDir/" which Unity can't stage/commit precisely.
-            if (!TryRunGitCommandRaw("status --porcelain=v1 -z --untracked-files=all", out var output, out _))
+            if (!TryRunGitCommandRaw("status --porcelain=v1 -z --untracked-files=all --find-renames", out var output, out _))
             {
                 return result;
             }
@@ -225,14 +230,17 @@ namespace OneKey.GitTools
                     continue;
                 }
 
+                string originalPathSegment = null;
+
                 // In porcelain v1 -z, rename/copy paths are emitted as two NUL-separated fields:
-                // "XY old\0new\0". Prefer the destination path for display/stage.
+                // "XY old\0new\0". Keep both paths so filtering/staging can account for moves in/out.
                 var statusPrimary = statusCode[0] != ' ' ? statusCode[0] : statusCode[1];
                 if ((statusPrimary == 'R' || statusPrimary == 'C') && i + 1 < records.Length)
                 {
                     var destination = records[i + 1];
                     if (!string.IsNullOrEmpty(destination))
                     {
+                        originalPathSegment = pathSegment;
                         pathSegment = destination;
                         i++;
                     }
@@ -255,13 +263,26 @@ namespace OneKey.GitTools
                 }
 
                 var unityRelativePath = ConvertGitPathToUnityPath(pathSegment);
+                var unityOriginalPath = string.IsNullOrEmpty(originalPathSegment) ? null : ConvertGitPathToUnityPath(originalPathSegment);
+
                 if (string.IsNullOrEmpty(unityRelativePath))
                 {
+                    if (!string.IsNullOrEmpty(unityOriginalPath) && changeType == GitChangeType.Renamed)
+                    {
+                        var workingTimeFallback = GetWorkingTreeTimestamp(unityOriginalPath, GitChangeType.Deleted);
+                        result.Add(new GitChangeEntry(unityOriginalPath, null, GitChangeType.Deleted, workingTimeFallback, isStaged, isUnstaged));
+                    }
+
                     continue;
                 }
 
+                if (string.IsNullOrEmpty(unityOriginalPath) && changeType == GitChangeType.Renamed)
+                {
+                    changeType = GitChangeType.Added;
+                }
+
                 var workingTime = GetWorkingTreeTimestamp(unityRelativePath, changeType);
-                result.Add(new GitChangeEntry(unityRelativePath, changeType, workingTime, isStaged, isUnstaged));
+                result.Add(new GitChangeEntry(unityRelativePath, unityOriginalPath, changeType, workingTime, isStaged, isUnstaged));
             }
 
             return result;
@@ -1093,32 +1114,18 @@ namespace OneKey.GitTools
                 }
 
                 total++;
-                var gitPath = ConvertUnityPathToGitPath(info.AssetPath);
-                if (string.IsNullOrEmpty(gitPath))
+                var stagedOk = StageSingleAssetPath(info, info.AssetPath, info.ChangeType);
+
+                if (info.ChangeType == GitChangeType.Renamed &&
+                    !string.IsNullOrEmpty(info.OriginalPath) &&
+                    !string.Equals(info.OriginalPath, info.AssetPath, StringComparison.OrdinalIgnoreCase))
                 {
-                    continue;
+                    stagedOk = stagedOk && StageSingleAssetPath(info, info.OriginalPath, GitChangeType.Deleted);
                 }
 
-                string arguments;
-                if (info.ChangeType == GitChangeType.Deleted)
-                {
-                    // 对已删除文件使用 -u 方式只更新已跟踪条目的删除状态
-                    arguments = BuildGitArgs("add -u", gitPath);
-                }
-                else
-                {
-                    arguments = BuildGitArgs("add", gitPath);
-                }
-
-                Debug.Log($"[GitQuickCommit] Stage: type={info.ChangeType}, unityPath={info.AssetPath}, gitPath={gitPath}, args=git {arguments}");
-
-                if (TryRunGitCommand(arguments, out _))
+                if (stagedOk)
                 {
                     succeeded++;
-                }
-                else
-                {
-                    Debug.LogWarning($"[GitQuickCommit] Stage failed for {gitPath}");
                 }
             }
 
@@ -1130,6 +1137,34 @@ namespace OneKey.GitTools
 
             summary = $"已发送至待提交: {succeeded}/{total} 个条目。";
             return succeeded > 0;
+        }
+
+        private static bool StageSingleAssetPath(GitAssetInfo info, string unityPath, GitChangeType changeType)
+        {
+            if (string.IsNullOrEmpty(unityPath))
+            {
+                return false;
+            }
+
+            var gitPath = ConvertUnityPathToGitPath(unityPath);
+            if (string.IsNullOrEmpty(gitPath))
+            {
+                return false;
+            }
+
+            var arguments = changeType == GitChangeType.Deleted
+                ? BuildGitArgs("add -u", gitPath)
+                : BuildGitArgs("add", gitPath);
+
+            Debug.Log($"[GitQuickCommit] Stage: type={changeType}, unityPath={unityPath}, gitPath={gitPath}, args=git {arguments}");
+
+            if (TryRunGitCommand(arguments, out _))
+            {
+                return true;
+            }
+
+            Debug.LogWarning($"[GitQuickCommit] Stage failed for {gitPath}");
+            return false;
         }
 
         internal static bool DiscardChanges(IEnumerable<GitAssetInfo> assets, out string summary)
@@ -1155,6 +1190,18 @@ namespace OneKey.GitTools
                 if (!info.AssetPath.EndsWith(".meta", StringComparison.OrdinalIgnoreCase))
                 {
                     DiscardSinglePath(info, $"{info.AssetPath}.meta");
+                }
+
+                if (info.ChangeType == GitChangeType.Renamed &&
+                    !string.IsNullOrEmpty(info.OriginalPath) &&
+                    !string.Equals(info.OriginalPath, info.AssetPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    DiscardSinglePath(info, info.OriginalPath);
+
+                    if (!info.OriginalPath.EndsWith(".meta", StringComparison.OrdinalIgnoreCase))
+                    {
+                        DiscardSinglePath(info, $"{info.OriginalPath}.meta");
+                    }
                 }
             }
 
@@ -1185,7 +1232,11 @@ namespace OneKey.GitTools
                 resetOk = TryRunGitCommand(BuildGitArgs("reset -q HEAD", gitPath), out _);
             }
 
-            if (info.ChangeType == GitChangeType.Added)
+            var treatAsAdded = info.ChangeType == GitChangeType.Added ||
+                               (info.ChangeType == GitChangeType.Renamed &&
+                                string.Equals(unityPath, info.AssetPath, StringComparison.OrdinalIgnoreCase));
+
+            if (treatAsAdded)
             {
                 var cleanFlags = isFolder ? "-fd" : "-f";
                 var cleanOk = TryRunGitCommand(BuildGitArgs($"clean {cleanFlags}", gitPath), out _);
@@ -1222,7 +1273,22 @@ namespace OneKey.GitTools
                 var arguments = BuildGitArgs("reset HEAD", gitPath);
                 Debug.Log($"[GitQuickCommit] Unstage: unityPath={info.AssetPath}, gitPath={gitPath}, args=git {arguments}");
 
-                if (TryRunGitCommand(arguments, out _))
+                var unstagedOk = TryRunGitCommand(arguments, out _);
+                if (unstagedOk &&
+                    info.ChangeType == GitChangeType.Renamed &&
+                    !string.IsNullOrEmpty(info.OriginalPath) &&
+                    !string.Equals(info.OriginalPath, info.AssetPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    var originalGitPath = ConvertUnityPathToGitPath(info.OriginalPath);
+                    if (!string.IsNullOrEmpty(originalGitPath))
+                    {
+                        var originalArgs = BuildGitArgs("reset HEAD", originalGitPath);
+                        Debug.Log($"[GitQuickCommit] Unstage: unityPath={info.OriginalPath}, gitPath={originalGitPath}, args=git {originalArgs}");
+                        unstagedOk = TryRunGitCommand(originalArgs, out _);
+                    }
+                }
+
+                if (unstagedOk)
                 {
                     succeeded++;
                 }
@@ -1291,7 +1357,7 @@ namespace OneKey.GitTools
             return true;
         }
 
-        internal static List<string> GetRecentCommitMessages(int maxCount)
+        internal static List<string> GetRecentCommitMessages(int maxCount, string authorPattern = null, bool excludeMerges = false)
         {
             var results = new List<string>();
             if (maxCount <= 0)
@@ -1299,7 +1365,17 @@ namespace OneKey.GitTools
                 return results;
             }
 
-            if (!TryRunGitCommand($"log -n {maxCount} --format=%s", out var output))
+            var args = $"log -n {maxCount} --format=%s";
+            if (excludeMerges)
+            {
+                args += " --no-merges";
+            }
+            if (!string.IsNullOrWhiteSpace(authorPattern))
+            {
+                args += $" --author={QuoteGitArgument(authorPattern.Trim())}";
+            }
+
+            if (!TryRunGitCommand(args, out var output))
             {
                 return results;
             }
@@ -1315,6 +1391,67 @@ namespace OneKey.GitTools
             }
 
             return results;
+        }
+
+        internal static List<string> GetRecentCommitMessagesForCurrentUser(int maxCount)
+        {
+            var authorPattern = GetCurrentUserAuthorPattern();
+            if (string.IsNullOrWhiteSpace(authorPattern))
+            {
+                return new List<string>();
+            }
+
+            return GetRecentCommitMessages(maxCount, authorPattern, excludeMerges: true);
+        }
+
+        private static string GetCurrentUserAuthorPattern()
+        {
+            if (TryGetGitConfigValue("user.email", out var email) && !string.IsNullOrWhiteSpace(email))
+            {
+                return EscapeGitAuthorPattern(email.Trim());
+            }
+
+            if (TryGetGitConfigValue("user.name", out var name) && !string.IsNullOrWhiteSpace(name))
+            {
+                return EscapeGitAuthorPattern(name.Trim());
+            }
+
+            return null;
+        }
+
+        private static bool TryGetGitConfigValue(string key, out string value)
+        {
+            value = null;
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                return false;
+            }
+
+            if (!TryRunGitCommand($"config --get {key}", out var output))
+            {
+                return false;
+            }
+
+            var firstLine = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                                  .Select(line => line.Trim())
+                                  .FirstOrDefault(line => !string.IsNullOrEmpty(line));
+            if (string.IsNullOrEmpty(firstLine))
+            {
+                return false;
+            }
+
+            value = firstLine;
+            return true;
+        }
+
+        private static string EscapeGitAuthorPattern(string pattern)
+        {
+            if (string.IsNullOrEmpty(pattern))
+            {
+                return pattern;
+            }
+
+            return Regex.Escape(pattern);
         }
 
         private static string ResolveAbsolutePath(string relativePath)

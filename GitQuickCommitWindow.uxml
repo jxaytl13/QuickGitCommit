@@ -6,12 +6,12 @@
                     <uie:ObjectField name="targetField" label="目标资源" class="flex-grow-field" style="flex-grow: 1;" />
                     <ui:Button name="clearExcludeButton" text="清除排除" style="display: flex; width: 100px; flex-shrink: 0; flex-grow: 0;" />
                 </ui:VisualElement>
-                <ui:Label name="pathLabel" class="secondary-text" style="flex-shrink: 1; height: 20px; margin-top: 10px;" />
-                <ui:Label name="operationHintLabel" text="提示：单击文件名定位，双击复制文件名；双击路径复制全路径。" class="hint-text" style="flex-shrink: 1; height: 20px;" />
+                <ui:Label name="pathLabel" class="secondary-text" />
+                <ui:Label name="operationHintLabel" text="提示：单击文件名定位，双击复制文件名；双击路径复制全路径。" class="hint-text" />
                 <ui:Label name="statusLabel" />
             </ui:VisualElement>
             <ui:VisualElement name="filterBox" class="card mb-4" style="width: 100%; height: auto;">
-                <ui:Label name="filterTitle" text="条件筛选" class="title-text" style="flex-shrink: 1; height: 20px; margin-top: 10px;" />
+                <ui:Label name="filterTitle" text="条件筛选" class="title-text" />
                 <ui:VisualElement name="typeRow" class="row space-between" style="flex-direction: row; justify-content: space-between;">
                     <ui:VisualElement name="typeGroup" class="row type-group" style="flex-direction: row; align-items: center; justify-content: space-between; flex-grow: 0;">
                         <ui:VisualElement name="addedContainer" class="row type-container type-added" style="flex-direction: row; width: auto; margin-right: 16px;">
@@ -32,7 +32,7 @@
                         <ui:DropdownField name="timePresetField" class="dropdown-preset" style="width: 100px;" />
                     </ui:VisualElement>
                 </ui:VisualElement>
-                <ui:Label name="timeRangeLabel" text="时间范围 (格式: yyyy-MM-dd HH:mm)" class="time-range-label" style="padding-right: 0; flex-shrink: 1; height: 20px; margin-top: 10px;" />
+                <ui:Label name="timeRangeLabel" text="时间范围 (格式: yyyy-MM-dd HH:mm)" class="time-range-label" style="padding-right: 0;" />
                 <ui:VisualElement name="timeRow" class="row time-row" style="flex-direction: row; justify-content: space-between;">
                     <ui:VisualElement name="startRow" class="start-row" style="flex-grow: 1;">
                         <ui:TextField name="startTimeField" label="开始" class="text-field-grow" />
@@ -43,7 +43,7 @@
                         <ui:Button name="refreshButton" text="刷新" class="primary-button" />
                     </ui:VisualElement>
                 </ui:VisualElement>
-                <ui:TextField name="searchField" tooltip="搜索变更区与待提交区（按文件名/路径）" readonly="false" is-delayed="false" multiline="false" tabindex="0" style="margin-top: 4px; height: 20px; margin-right: 4px; margin-bottom: 4px; margin-left: 4px;" />
+                <ui:TextField name="searchField" label="搜索" tooltip="搜索变更区与待提交区（按文件名/路径）" style="margin-top: 6px;" />
             </ui:VisualElement>
             <ui:VisualElement name="middleRow" class="middle-row" style="flex-grow: 1; flex-direction: row; height: 1000px; width: 100%; justify-content: space-between;">
                 <ui:VisualElement name="leftColumn" class="list-column left-column" style="flex-grow: 0; height: auto; width: 500px; border-top-width: 2px; border-right-width: 2px; border-bottom-width: 2px; border-left-width: 2px; border-left-color: rgba(255, 255, 255, 0.2); border-right-color: rgba(255, 255, 255, 0.2); border-top-color: rgba(255, 255, 255, 0.2); border-bottom-color: rgba(255, 255, 255, 0.2); border-top-left-radius: 4px; border-top-right-radius: 4px; border-bottom-right-radius: 4px; border-bottom-left-radius: 4px; margin-top: 2px; margin-right: 2px; margin-bottom: 2px; margin-left: 2px;">
@@ -57,9 +57,9 @@
                     </ui:VisualElement>
                     <ui:ScrollView name="unstagedScrollView" class="scroll-fill" style="flex-grow: 1; height: 100%; width: 100%;" />
                 </ui:VisualElement>
-                <ui:VisualElement name="middleColumn" class="middle-column" style="width: 40px; justify-content: center; flex-shrink: 1; height: auto; align-items: center; flex-grow: 0;">
-                    <ui:Button name="toStagedButton" text="&gt;" class="arrow-button" style="flex-grow: 0; width: 30px; height: 20px; padding-top: 0; padding-right: 0; padding-bottom: 0; padding-left: 0;" />
-                    <ui:Button name="toUnstagedButton" text="&lt;" class="arrow-button" style="flex-grow: 0; padding-top: 0; padding-right: 0; padding-bottom: 0; padding-left: 0; height: 20px; width: 30px;" />
+                <ui:VisualElement name="middleColumn" class="middle-column" style="width: 40px; justify-content: center; flex-shrink: 1; height: 100%; align-items: center;">
+                    <ui:Button name="toStagedButton" text="&gt;" class="arrow-button" style="flex-grow: 0; width: 40px; height: 40px;" />
+                    <ui:Button name="toUnstagedButton" text="&lt;" class="arrow-button" style="flex-grow: 0; width: 40px; height: 40px;" />
                 </ui:VisualElement>
                 <ui:VisualElement name="rightColumn" class="list-column right-column" style="flex-grow: 0; height: auto; width: 500px; border-top-width: 2px; border-right-width: 2px; border-bottom-width: 2px; border-left-width: 2px; border-left-color: rgba(255, 255, 255, 0.2); border-right-color: rgba(255, 255, 255, 0.2); border-top-color: rgba(255, 255, 255, 0.2); border-bottom-color: rgba(255, 255, 255, 0.2); border-top-left-radius: 4px; border-top-right-radius: 4px; border-bottom-right-radius: 4px; border-bottom-left-radius: 4px; margin-top: 2px; margin-right: 2px; margin-bottom: 2px; margin-left: 2px;">
                     <ui:VisualElement name="stagedHeaderRow" class="row header-row" style="flex-direction: row; height: 20px; justify-content: space-between; width: auto; margin-bottom: 4px; margin-top: 4px; margin-right: 4px; margin-left: 4px; border-bottom-width: 1px; border-left-color: rgba(255, 255, 255, 0.2); border-right-color: rgba(255, 255, 255, 0.2); border-top-color: rgba(255, 255, 255, 0.2); border-bottom-color: rgba(255, 255, 255, 0.2);">
