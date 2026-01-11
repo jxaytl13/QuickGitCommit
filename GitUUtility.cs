@@ -907,7 +907,8 @@ namespace TLNexus.GitU
                 return false;
             }
 
-            var safeMessage = message.Trim().Replace("\r", " ").Replace("\n", " ");
+            var trimmed = message.Trim();
+            var containsLineBreak = trimmed.IndexOfAny(new[] { '\r', '\n' }) >= 0;
 
             if (!TryRunGitCommandNoLog(gitRoot, "diff --cached --name-only", GitCommandTimeoutShortMs, out var diffOutput, out var diffError))
             {
@@ -923,13 +924,46 @@ namespace TLNexus.GitU
                 return false;
             }
 
-            var commitArgs = $"commit -m {QuoteGitArgument(safeMessage)}";
-            if (!TryRunGitCommandNoLog(gitRoot, commitArgs, GitCommandTimeoutMediumMs, out _, out var commitError))
+            string commitArgs;
+            string tempMessageFilePath = null;
+            try
             {
-                summary = string.IsNullOrEmpty(commitError)
-                    ? "提交失败，请查看 Console 日志中的 Git 输出。"
-                    : $"提交失败：{commitError.Trim()}";
-                return false;
+                if (!containsLineBreak)
+                {
+                    commitArgs = $"commit -m {QuoteGitArgument(trimmed)}";
+                }
+                else
+                {
+                    tempMessageFilePath = Path.Combine(Path.GetTempPath(), $"GitUCommitMessage_{Guid.NewGuid():N}.txt");
+                    var normalized = trimmed.Replace("\r\n", "\n").Replace('\r', '\n');
+                    File.WriteAllText(tempMessageFilePath, normalized, Encoding.UTF8);
+                    commitArgs = $"commit -F {QuoteGitArgument(tempMessageFilePath)}";
+                }
+
+                if (!TryRunGitCommandNoLog(gitRoot, commitArgs, GitCommandTimeoutMediumMs, out _, out var commitError))
+                {
+                    summary = string.IsNullOrEmpty(commitError)
+                        ? "提交失败，请查看 Console 日志中的 Git 输出。"
+                        : $"提交失败：{commitError.Trim()}";
+                    return false;
+                }
+            }
+            finally
+            {
+                if (!string.IsNullOrEmpty(tempMessageFilePath))
+                {
+                    try
+                    {
+                        if (File.Exists(tempMessageFilePath))
+                        {
+                            File.Delete(tempMessageFilePath);
+                        }
+                    }
+                    catch
+                    {
+                        // ignored
+                    }
+                }
             }
 
             summary = "提交成功。";
@@ -1685,7 +1719,7 @@ namespace TLNexus.GitU
             }
 
             var trimmed = message.Trim();
-            var safeMessage = trimmed.Replace("\r", " ").Replace("\n", " ");
+            var containsLineBreak = trimmed.IndexOfAny(new[] { '\r', '\n' }) >= 0;
 
             if (!TryRunGitCommand($"diff --cached --name-only", out var diffOutput))
             {
@@ -1699,10 +1733,44 @@ namespace TLNexus.GitU
                 return false;
             }
 
-            if (!TryRunGitCommand($"commit -m {QuoteGitArgument(safeMessage)}", out var output, GitCommandTimeoutMediumMs))
+            string commitArgs;
+            string tempMessageFilePath = null;
+            try
             {
-                summary = "提交失败，请查看 Console 日志中的 Git 输出。";
-                return false;
+                if (!containsLineBreak)
+                {
+                    commitArgs = $"commit -m {QuoteGitArgument(trimmed)}";
+                }
+                else
+                {
+                    tempMessageFilePath = Path.Combine(Path.GetTempPath(), $"GitUCommitMessage_{Guid.NewGuid():N}.txt");
+                    var normalized = trimmed.Replace("\r\n", "\n").Replace('\r', '\n');
+                    File.WriteAllText(tempMessageFilePath, normalized, Encoding.UTF8);
+                    commitArgs = $"commit -F {QuoteGitArgument(tempMessageFilePath)}";
+                }
+
+                if (!TryRunGitCommand(commitArgs, out var output, GitCommandTimeoutMediumMs))
+                {
+                    summary = "提交失败，请查看 Console 日志中的 Git 输出。";
+                    return false;
+                }
+            }
+            finally
+            {
+                if (!string.IsNullOrEmpty(tempMessageFilePath))
+                {
+                    try
+                    {
+                        if (File.Exists(tempMessageFilePath))
+                        {
+                            File.Delete(tempMessageFilePath);
+                        }
+                    }
+                    catch
+                    {
+                        // ignored
+                    }
+                }
             }
 
             summary = "提交成功。";

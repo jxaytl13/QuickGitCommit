@@ -10,13 +10,12 @@ using UnityEditor.UIElements;
 
 namespace TLNexus.GitU
 {
-    internal class GitUWindow : EditorWindow
+    internal partial class GitUWindow : EditorWindow
     {
         private const string WindowTitle = "GitU";
         private const string MenuPath = "Window/T·L Nexus/GitU";
         private const string CommitHistoryFileName = "GitUCommitHistory.json";
         private const string LegacyCommitHistoryFileName = "QuickGitCommitHistory.json";
-        private const string LayoutAssetName = "GitUWindow.uxml";
         private const int MaxCommitHistoryEntries = 20;
         private const string StagedAllowListFileName = "GitUStagedAllowList.json";
         private const string LegacyStagedAllowListFileName = "QuickGitCommitStagedAllowList.json";
@@ -29,7 +28,12 @@ namespace TLNexus.GitU
         private const string AddedSegmentFormat = "<color={0}>\u65b0\u589e {1}</color>";
         private const string ModifiedSegmentFormat = "<color={0}>\u4fee\u6539 {1}</color>";
         private const string DeletedSegmentFormat = "<color={0}>\u5220\u9664 {1}</color>";
-        private static string cachedAssetFolderPath;
+        private const string SearchPlaceholderText = "\u641c\u7d22\u6587\u4ef6 / \u8def\u5f84 / \u53d8\u66f4\u2026";
+        private const string CommitMessagePlaceholderText = "\u5728\u8fd9\u91cc\u586b\u5199\u63d0\u4ea4\u4fe1\u606f\u2026";
+        private static readonly Color SearchFieldTextColor = new Color(1f, 1f, 1f, 0.5f);
+        private static readonly Color SearchFieldPlaceholderTextColor = new Color(1f, 1f, 1f, 0.5f);
+        private static readonly Color CommitFieldTextColor = Color.white;
+        private static readonly Color CommitFieldPlaceholderTextColor = new Color(1f, 1f, 1f, 0.3f);
 
         private UnityEngine.Object targetAsset;
         private string targetAssetPath;
@@ -122,6 +126,8 @@ namespace TLNexus.GitU
         private string statusMessage;
         private string commitMessage = string.Empty;
         private string repositoryStatusMessage = "\u6b63\u5728\u68c0\u6d4b Git \u72b6\u6001...";
+        private bool searchPlaceholderActive;
+        private bool commitMessagePlaceholderActive;
         private List<string> commitHistory;
         private List<string> savedCommitHistory;
         private List<string> fallbackCommitHistory;
@@ -690,7 +696,7 @@ namespace TLNexus.GitU
             var root = rootVisualElement;
             root.Clear();
 
-            if (!BuildLayoutFromUxml(root))
+            if (!BuildLayoutFromCode(root))
             {
                 return;
             }
@@ -723,12 +729,19 @@ namespace TLNexus.GitU
             }
             if (searchField != null)
             {
-                searchField.value = searchQuery;
+                ConfigureSearchPlaceholder();
                 searchField.RegisterValueChangedCallback(evt =>
                 {
+                    if (searchPlaceholderActive)
+                    {
+                        return;
+                    }
+
                     searchQuery = evt.newValue ?? string.Empty;
                     RequestRefreshListViewsDebounced(0.18);
                 });
+                searchField.RegisterCallback<FocusInEvent>(_ => ClearSearchPlaceholderIfNeeded());
+                searchField.RegisterCallback<FocusOutEvent>(_ => ApplySearchPlaceholderIfNeeded());
             }
             if (refreshButton != null)
             {
@@ -736,12 +749,19 @@ namespace TLNexus.GitU
             }
             if (commitMessageField != null)
             {
-                commitMessageField.value = commitMessage;
+                ConfigureCommitMessagePlaceholder();
                 commitMessageField.RegisterValueChangedCallback(evt =>
                 {
+                    if (commitMessagePlaceholderActive)
+                    {
+                        return;
+                    }
+
                     commitMessage = evt.newValue;
                     UpdateCommitButtonsEnabled();
                 });
+                commitMessageField.RegisterCallback<FocusInEvent>(_ => ClearCommitMessagePlaceholderIfNeeded());
+                commitMessageField.RegisterCallback<FocusOutEvent>(_ => ApplyCommitMessagePlaceholderIfNeeded());
             }
             if (historyButton != null)
             {
@@ -782,6 +802,159 @@ namespace TLNexus.GitU
             UpdateHeaderLabels();
             UpdateCommitButtonsEnabled();
             RefreshListViews();
+        }
+
+        private void ConfigureSearchPlaceholder()
+        {
+            if (searchField == null)
+            {
+                return;
+            }
+
+            if (IsTextFieldFocused(searchField))
+            {
+                searchPlaceholderActive = false;
+                searchField.SetValueWithoutNotify(searchQuery ?? string.Empty);
+                SetTextFieldTextColor(searchField, SearchFieldTextColor);
+                return;
+            }
+
+            if (string.IsNullOrEmpty(searchQuery))
+            {
+                searchField.SetValueWithoutNotify(SearchPlaceholderText);
+                searchPlaceholderActive = true;
+                SetTextFieldTextColor(searchField, SearchFieldPlaceholderTextColor);
+            }
+            else
+            {
+                searchField.SetValueWithoutNotify(searchQuery);
+                searchPlaceholderActive = false;
+                SetTextFieldTextColor(searchField, SearchFieldTextColor);
+            }
+        }
+
+        private void ClearSearchPlaceholderIfNeeded()
+        {
+            if (searchField == null || !searchPlaceholderActive)
+            {
+                return;
+            }
+
+            searchPlaceholderActive = false;
+            searchField.SetValueWithoutNotify(string.Empty);
+            SetTextFieldTextColor(searchField, SearchFieldTextColor);
+        }
+
+        private void ApplySearchPlaceholderIfNeeded()
+        {
+            if (searchField == null || searchPlaceholderActive)
+            {
+                return;
+            }
+
+            if (!string.IsNullOrEmpty(searchField.value))
+            {
+                return;
+            }
+
+            searchPlaceholderActive = true;
+            searchField.SetValueWithoutNotify(SearchPlaceholderText);
+            SetTextFieldTextColor(searchField, SearchFieldPlaceholderTextColor);
+        }
+
+        private void ConfigureCommitMessagePlaceholder()
+        {
+            if (commitMessageField == null)
+            {
+                return;
+            }
+
+            if (IsTextFieldFocused(commitMessageField))
+            {
+                commitMessagePlaceholderActive = false;
+                commitMessageField.SetValueWithoutNotify(commitMessage ?? string.Empty);
+                SetTextFieldTextColor(commitMessageField, CommitFieldTextColor);
+                UpdateCommitButtonsEnabled();
+                return;
+            }
+
+            if (string.IsNullOrEmpty(commitMessage))
+            {
+                commitMessageField.SetValueWithoutNotify(CommitMessagePlaceholderText);
+                commitMessagePlaceholderActive = true;
+                SetTextFieldTextColor(commitMessageField, CommitFieldPlaceholderTextColor);
+            }
+            else
+            {
+                commitMessageField.SetValueWithoutNotify(commitMessage);
+                commitMessagePlaceholderActive = false;
+                SetTextFieldTextColor(commitMessageField, CommitFieldTextColor);
+            }
+
+            UpdateCommitButtonsEnabled();
+        }
+
+        private void ClearCommitMessagePlaceholderIfNeeded()
+        {
+            if (commitMessageField == null || !commitMessagePlaceholderActive)
+            {
+                return;
+            }
+
+            commitMessagePlaceholderActive = false;
+            commitMessageField.SetValueWithoutNotify(string.Empty);
+            SetTextFieldTextColor(commitMessageField, CommitFieldTextColor);
+        }
+
+        private void ApplyCommitMessagePlaceholderIfNeeded()
+        {
+            if (commitMessageField == null || commitMessagePlaceholderActive)
+            {
+                return;
+            }
+
+            if (!string.IsNullOrEmpty(commitMessageField.value))
+            {
+                return;
+            }
+
+            commitMessage = string.Empty;
+            commitMessagePlaceholderActive = true;
+            commitMessageField.SetValueWithoutNotify(CommitMessagePlaceholderText);
+            SetTextFieldTextColor(commitMessageField, CommitFieldPlaceholderTextColor);
+            UpdateCommitButtonsEnabled();
+        }
+
+        private static void SetTextFieldTextColor(TextField field, Color color)
+        {
+            if (field == null)
+            {
+                return;
+            }
+
+            var input = field.Q<VisualElement>(className: "unity-text-field__input");
+            if (input != null)
+            {
+                input.Query<TextElement>().ForEach(e => e.style.color = color);
+                input.style.color = color;
+            }
+
+            var fallback = field.Q<TextElement>(className: "unity-text-element");
+            if (fallback != null)
+            {
+                fallback.style.color = color;
+            }
+        }
+
+        private static bool IsTextFieldFocused(TextField field)
+        {
+            if (field == null)
+            {
+                return false;
+            }
+
+            var focused = field.panel?.focusController?.focusedElement as VisualElement;
+            return focused != null && IsDescendantOf(focused, field);
         }
 
         private void PollRefreshTask()
@@ -930,10 +1103,7 @@ namespace TLNexus.GitU
                     }
 
                     commitMessage = string.Empty;
-                    if (commitMessageField != null)
-                    {
-                        commitMessageField.value = string.Empty;
-                    }
+                    ConfigureCommitMessagePlaceholder();
 
                     HideHistoryDropdown();
                 }
@@ -966,56 +1136,6 @@ namespace TLNexus.GitU
             {
                 RequestRefreshDataDebounced(false);
             }
-        }
-
-        private bool BuildLayoutFromUxml(VisualElement root)
-        {
-            var uxmlPath = Path.Combine(GetAssetFolderPath(), LayoutAssetName).Replace("\\", "/");
-            var layoutAsset = LoadAssetAtPathOrByName<VisualTreeAsset>(uxmlPath, Path.GetFileNameWithoutExtension(LayoutAssetName));
-            if (layoutAsset == null)
-            {
-                ShowLayoutLoadError(root, $"无法加载布局文件: {uxmlPath}\n请确认该文件已导入为 VisualTreeAsset。");
-                return false;
-            }
-
-            var layoutInstance = layoutAsset.CloneTree();
-            root.Add(layoutInstance);
-
-            CacheUIElements(root);
-            return true;
-        }
-
-        private static T LoadAssetAtPathOrByName<T>(string assetPath, string nameWithoutExtension) where T : UnityEngine.Object
-        {
-            var asset = AssetDatabase.LoadAssetAtPath<T>(assetPath);
-            if (asset != null)
-            {
-                return asset;
-            }
-
-            var typeName = typeof(T).Name;
-            var guids = AssetDatabase.FindAssets($"{nameWithoutExtension} t:{typeName}");
-            if (guids == null || guids.Length == 0)
-            {
-                return null;
-            }
-
-            foreach (var guid in guids)
-            {
-                var candidatePath = AssetDatabase.GUIDToAssetPath(guid);
-                if (string.IsNullOrEmpty(candidatePath))
-                {
-                    continue;
-                }
-
-                var candidate = AssetDatabase.LoadAssetAtPath<T>(candidatePath);
-                if (candidate != null)
-                {
-                    return candidate;
-                }
-            }
-
-            return null;
         }
 
         private static void ShowLayoutLoadError(VisualElement root, string message)
@@ -1099,12 +1219,12 @@ namespace TLNexus.GitU
 
         private void UpdateChangeTypeButtonsVisuals()
         {
-            UpdateChangeTypeButtonVisual(addedButton, showAdded);
-            UpdateChangeTypeButtonVisual(modifiedButton, showModified);
-            UpdateChangeTypeButtonVisual(deletedButton, showDeleted);
+            UpdateChangeTypeButtonVisual(addedButton, showAdded, new Color(0.5f, 0.85f, 0.5f));
+            UpdateChangeTypeButtonVisual(modifiedButton, showModified, new Color(0.95f, 0.75f, 0.4f));
+            UpdateChangeTypeButtonVisual(deletedButton, showDeleted, new Color(0.9f, 0.5f, 0.5f));
         }
 
-        private static void UpdateChangeTypeButtonVisual(Button button, bool enabled)
+        private static void UpdateChangeTypeButtonVisual(Button button, bool enabled, Color accentColor)
         {
             if (button == null)
             {
@@ -1112,17 +1232,21 @@ namespace TLNexus.GitU
             }
 
             button.style.opacity = enabled ? 1f : 0.35f;
+            button.style.color = accentColor;
             button.style.backgroundColor = enabled
-                ? new Color(0.22f, 0.22f, 0.22f, 0.75f)
+                ? new Color(accentColor.r, accentColor.g, accentColor.b, 0.10f)
                 : new Color(0.12f, 0.12f, 0.12f, 0.35f);
             button.style.borderTopWidth = 1;
             button.style.borderRightWidth = 1;
             button.style.borderBottomWidth = 1;
             button.style.borderLeftWidth = 1;
-            button.style.borderTopColor = new Color(1f, 1f, 1f, 0.08f);
-            button.style.borderRightColor = new Color(1f, 1f, 1f, 0.08f);
-            button.style.borderBottomColor = new Color(1f, 1f, 1f, 0.08f);
-            button.style.borderLeftColor = new Color(1f, 1f, 1f, 0.08f);
+            var borderColor = enabled
+                ? new Color(accentColor.r, accentColor.g, accentColor.b, 0.75f)
+                : new Color(1f, 1f, 1f, 0.08f);
+            button.style.borderTopColor = borderColor;
+            button.style.borderRightColor = borderColor;
+            button.style.borderBottomColor = borderColor;
+            button.style.borderLeftColor = borderColor;
             button.style.unityTextAlign = TextAnchor.MiddleCenter;
         }
 
@@ -2368,9 +2492,11 @@ namespace TLNexus.GitU
             }
 
             commitMessage = entry;
+            commitMessagePlaceholderActive = false;
             if (commitMessageField != null)
             {
                 commitMessageField.SetValueWithoutNotify(entry);
+                SetTextFieldTextColor(commitMessageField, CommitFieldTextColor);
             }
             UpdateCommitButtonsEnabled();
             HideHistoryDropdown();
@@ -2583,9 +2709,16 @@ namespace TLNexus.GitU
 
             EnsureCommitHistoryLoaded();
             var trimmed = message.Trim();
+            var newlineIndex = trimmed.IndexOfAny(new[] { '\r', '\n' });
+            var historyEntry = newlineIndex >= 0 ? trimmed.Substring(0, newlineIndex).Trim() : trimmed;
+            if (string.IsNullOrWhiteSpace(historyEntry))
+            {
+                return;
+            }
+
             savedCommitHistory ??= new List<string>();
-            savedCommitHistory.RemoveAll(entry => string.Equals(entry, trimmed, StringComparison.Ordinal));
-            savedCommitHistory.Insert(0, trimmed);
+            savedCommitHistory.RemoveAll(entry => string.Equals(entry, historyEntry, StringComparison.Ordinal));
+            savedCommitHistory.Insert(0, historyEntry);
             if (savedCommitHistory.Count > MaxCommitHistoryEntries)
             {
                 savedCommitHistory.RemoveRange(MaxCommitHistoryEntries, savedCommitHistory.Count - MaxCommitHistoryEntries);
@@ -2995,18 +3128,60 @@ namespace TLNexus.GitU
             container.style.flexShrink = 1f;
             container.style.alignSelf = Align.Stretch;
             container.style.minWidth = 0;
+            container.style.borderTopLeftRadius = 0;
+            container.style.borderTopRightRadius = 0;
+            container.style.borderBottomRightRadius = 0;
+            container.style.borderBottomLeftRadius = 0;
+            container.style.paddingLeft = 10;
+            container.style.paddingRight = 10;
+            container.style.paddingTop = 0;
+            container.style.paddingBottom = 0;
+            container.style.height = 38;
+            container.style.minHeight = 38;
+            container.style.overflow = Overflow.Hidden;
+            container.style.borderTopWidth = 0;
+            container.style.borderRightWidth = 0;
+            container.style.borderBottomWidth = 1;
+            container.style.borderLeftWidth = 0;
+            container.style.borderBottomColor = Rgb(20, 20, 20);
 
             var row = new VisualElement();
             row.AddToClassList("gitU-asset-row");
             row.style.flexDirection = FlexDirection.Row;
+            row.style.alignItems = Align.Center;
+            row.style.height = Percent(100);
 
             var iconContainer = new VisualElement();
             iconContainer.AddToClassList("gitU-asset-icon-container");
+            iconContainer.style.width = 30;
+            iconContainer.style.height = 30;
+            iconContainer.style.minWidth = 30;
+            iconContainer.style.minHeight = 30;
+            iconContainer.style.borderTopLeftRadius = 8;
+            iconContainer.style.borderTopRightRadius = 8;
+            iconContainer.style.borderBottomRightRadius = 8;
+            iconContainer.style.borderBottomLeftRadius = 8;
+            iconContainer.style.borderTopWidth = 0;
+            iconContainer.style.borderRightWidth = 0;
+            iconContainer.style.borderBottomWidth = 0;
+            iconContainer.style.borderLeftWidth = 0;
+            var iconBorder = Rgba(255, 255, 255, 0.14f);
+            iconContainer.style.borderTopColor = iconBorder;
+            iconContainer.style.borderRightColor = iconBorder;
+            iconContainer.style.borderBottomColor = iconBorder;
+            iconContainer.style.borderLeftColor = iconBorder;
+            iconContainer.style.backgroundColor = Color.clear;
+            iconContainer.style.justifyContent = Justify.Center;
+            iconContainer.style.alignItems = Align.Center;
+            iconContainer.style.flexShrink = 0;
+            iconContainer.style.marginRight = 8;
             row.Add(iconContainer);
 
             var iconImage = new Image();
             iconImage.AddToClassList("gitU-asset-icon");
             iconImage.scaleMode = ScaleMode.ScaleToFit;
+            iconImage.style.width = 18;
+            iconImage.style.height = 18;
             iconContainer.Add(iconImage);
 
             var namePathColumn = new VisualElement();
@@ -3015,6 +3190,7 @@ namespace TLNexus.GitU
             namePathColumn.style.flexGrow = 1f;
             namePathColumn.style.flexShrink = 1f;
             namePathColumn.style.minWidth = 0;
+            namePathColumn.style.justifyContent = Justify.Center;
             row.Add(namePathColumn);
 
             var nameLabel = new Label();
@@ -3030,14 +3206,53 @@ namespace TLNexus.GitU
             pathInfoLabel.style.whiteSpace = WhiteSpace.NoWrap;
             pathInfoLabel.style.overflow = Overflow.Hidden;
             pathInfoLabel.style.textOverflow = TextOverflow.Ellipsis;
+            pathInfoLabel.style.marginTop = 1;
+            pathInfoLabel.style.fontSize = 10;
+            pathInfoLabel.style.color = Rgba(255, 255, 255, 0.55f);
             namePathColumn.Add(pathInfoLabel);
 
             var changeBadgeContainer = new VisualElement();
             changeBadgeContainer.AddToClassList("gitU-change-badge");
+            changeBadgeContainer.style.width = 20;
+            changeBadgeContainer.style.height = 20;
+            changeBadgeContainer.style.minWidth = 20;
+            changeBadgeContainer.style.minHeight = 20;
+            changeBadgeContainer.style.marginLeft = 8;
+            changeBadgeContainer.style.borderTopLeftRadius = 4;
+            changeBadgeContainer.style.borderTopRightRadius = 4;
+            changeBadgeContainer.style.borderBottomRightRadius = 4;
+            changeBadgeContainer.style.borderBottomLeftRadius = 4;
+            changeBadgeContainer.style.borderTopWidth = 1;
+            changeBadgeContainer.style.borderRightWidth = 1;
+            changeBadgeContainer.style.borderBottomWidth = 1;
+            changeBadgeContainer.style.borderLeftWidth = 1;
+            var badgeBorder = Rgba(255, 255, 255, 0.16f);
+            changeBadgeContainer.style.borderTopColor = badgeBorder;
+            changeBadgeContainer.style.borderRightColor = badgeBorder;
+            changeBadgeContainer.style.borderBottomColor = badgeBorder;
+            changeBadgeContainer.style.borderLeftColor = badgeBorder;
+            changeBadgeContainer.style.backgroundColor = Rgba(255, 255, 255, 0.02f);
+            changeBadgeContainer.style.justifyContent = Justify.Center;
+            changeBadgeContainer.style.alignItems = Align.Center;
+            changeBadgeContainer.style.flexShrink = 0;
             row.Add(changeBadgeContainer);
 
             var changeBadgeLabel = new Label();
             changeBadgeLabel.AddToClassList("gitU-change-badge-label");
+            changeBadgeLabel.style.fontSize = 10;
+            changeBadgeLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
+            changeBadgeLabel.style.color = Rgba(255, 255, 255, 0.85f);
+            changeBadgeLabel.style.unityTextAlign = TextAnchor.MiddleCenter;
+            changeBadgeLabel.style.width = 20;
+            changeBadgeLabel.style.height = 20;
+            changeBadgeLabel.style.marginTop = 0;
+            changeBadgeLabel.style.marginRight = 0;
+            changeBadgeLabel.style.marginBottom = 0;
+            changeBadgeLabel.style.marginLeft = 0;
+            changeBadgeLabel.style.paddingTop = 0;
+            changeBadgeLabel.style.paddingRight = 0;
+            changeBadgeLabel.style.paddingBottom = 0;
+            changeBadgeLabel.style.paddingLeft = 0;
             changeBadgeContainer.Add(changeBadgeLabel);
 
             container.Add(row);
@@ -3053,7 +3268,26 @@ namespace TLNexus.GitU
             };
             container.userData = refs;
 
-            row.RegisterCallback<PointerDownEvent>(evt =>
+            container.RegisterCallback<MouseEnterEvent>(_ =>
+            {
+                if (container.ClassListContains("gitU-asset-item--selected"))
+                {
+                    return;
+                }
+
+                container.style.backgroundColor = Rgba(255, 255, 255, 0.04f);
+            });
+            container.RegisterCallback<MouseLeaveEvent>(_ =>
+            {
+                if (container.ClassListContains("gitU-asset-item--selected"))
+                {
+                    return;
+                }
+
+                container.style.backgroundColor = Color.clear;
+            });
+
+            row.RegisterCallback<MouseDownEvent>(evt =>
             {
                 if (evt.button == 1)
                 {
@@ -3080,18 +3314,19 @@ namespace TLNexus.GitU
                 HandleRowSelection(stagedView, refs.Info, refs.BoundIndex, evt.shiftKey, evt.actionKey);
 
                 refs.DragArmed = true;
-                refs.DragStartPosition = evt.position;
-                refs.DragPointerId = evt.pointerId;
+                refs.DragStartPosition = new Vector3(evt.mousePosition.x, evt.mousePosition.y, 0f);
+                refs.DragPointerId = 0;
             });
 
-            row.RegisterCallback<PointerMoveEvent>(evt =>
+            row.RegisterCallback<MouseMoveEvent>(evt =>
             {
-                if (!refs.DragArmed || evt.pointerId != refs.DragPointerId)
+                if (!refs.DragArmed || (evt.pressedButtons & 1) == 0)
                 {
                     return;
                 }
 
-                var delta = evt.position - refs.DragStartPosition;
+                var position = new Vector3(evt.mousePosition.x, evt.mousePosition.y, 0f);
+                var delta = position - refs.DragStartPosition;
                 if (delta.sqrMagnitude < 64f)
                 {
                     return;
@@ -3102,13 +3337,8 @@ namespace TLNexus.GitU
                 TryStartDrag(stagedView, refs.Info, refs.BoundIndex);
             });
 
-            row.RegisterCallback<PointerUpEvent>(evt =>
+            row.RegisterCallback<MouseUpEvent>(_ =>
             {
-                if (evt.pointerId != refs.DragPointerId)
-                {
-                    return;
-                }
-
                 refs.DragArmed = false;
             });
 
@@ -3369,6 +3599,12 @@ namespace TLNexus.GitU
                 return;
             }
 
+            var currentEvent = Event.current;
+            if (currentEvent == null || (currentEvent.type != EventType.MouseDown && currentEvent.type != EventType.MouseDrag))
+            {
+                return;
+            }
+
             var sourceSet = sourceStaged ? selectedStagedPaths : selectedUnstagedPaths;
             if (!sourceSet.Contains(info.AssetPath))
             {
@@ -3419,6 +3655,9 @@ namespace TLNexus.GitU
                 : selectedUnstagedPaths.Contains(info.AssetPath);
             element.EnableInClassList("gitU-asset-item--selected", isSelected);
             element.parent?.EnableInClassList("gitU-list-item--selected", isSelected);
+
+            ApplyAssetItemSelectionVisual(element, isSelected);
+            ApplyListItemWrapperBaseVisual(element.parent, isSelected);
 
             if (refs.IconImage != null)
             {
@@ -3530,6 +3769,53 @@ namespace TLNexus.GitU
 
                 refs.PathLabel.text = $"{displayPath} ｜ {timeText}";
             }
+        }
+
+        private static void ApplyAssetItemSelectionVisual(VisualElement item, bool selected)
+        {
+            if (item == null)
+            {
+                return;
+            }
+
+            item.style.borderTopWidth = 0;
+            item.style.borderRightWidth = 0;
+            item.style.borderBottomWidth = 1;
+            item.style.borderLeftWidth = 0;
+            item.style.borderTopColor = Color.clear;
+            item.style.borderRightColor = Color.clear;
+            item.style.borderBottomColor = Rgb(20, 20, 20);
+            item.style.borderLeftColor = Color.clear;
+            item.style.backgroundColor = selected ? Rgba(139, 92, 246, 0.26f) : Color.clear;
+        }
+
+        private static void ApplyListItemWrapperBaseVisual(VisualElement wrapper, bool selected)
+        {
+            if (wrapper == null)
+            {
+                return;
+            }
+
+            wrapper.style.marginTop = 0;
+            wrapper.style.marginBottom = 0;
+            wrapper.style.marginLeft = 0;
+            wrapper.style.marginRight = 0;
+            wrapper.style.height = 38;
+            wrapper.style.minHeight = 38;
+            wrapper.style.borderTopLeftRadius = 0;
+            wrapper.style.borderTopRightRadius = 0;
+            wrapper.style.borderBottomRightRadius = 8;
+            wrapper.style.borderBottomLeftRadius = 8;
+            wrapper.style.borderTopWidth = 0;
+            wrapper.style.borderRightWidth = 0;
+            wrapper.style.borderBottomWidth = 0;
+            wrapper.style.borderLeftWidth = 0;
+            wrapper.style.borderTopColor = Color.clear;
+            wrapper.style.borderRightColor = Color.clear;
+            wrapper.style.borderBottomColor = Color.clear;
+            wrapper.style.borderLeftColor = Color.clear;
+
+            wrapper.style.backgroundColor = Rgba(255, 255, 255, 0.02f);
         }
 
         private void ConfirmDiscardChange(GitAssetInfo info)
@@ -3950,20 +4236,6 @@ namespace TLNexus.GitU
                     AddAncestorFolderMetas(changedPath);
                 }
             }
-        }
-
-        private string GetAssetFolderPath()
-        {
-            if (!string.IsNullOrEmpty(cachedAssetFolderPath))
-            {
-                return cachedAssetFolderPath;
-            }
-
-            var script = MonoScript.FromScriptableObject(this);
-            var scriptPath = AssetDatabase.GetAssetPath(script);
-            var directory = string.IsNullOrEmpty(scriptPath) ? "Assets" : Path.GetDirectoryName(scriptPath);
-            cachedAssetFolderPath = string.IsNullOrEmpty(directory) ? "Assets" : directory.Replace("\\", "/");
-            return cachedAssetFolderPath;
         }
 
         private static string GetFolderPath(string assetPath)
