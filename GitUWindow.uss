@@ -170,7 +170,7 @@
 }
 
 .right-panel {
-    margin-left: 10px;
+    margin-left: 0;
 }
 
 .panel-header {
@@ -338,7 +338,10 @@
 /* ListView item polish (works even with code-generated rows) */
 #unstagedScrollView .unity-list-view__item,
 #stagedScrollView .unity-list-view__item {
-    margin-bottom: 8px;
+    margin-top: 1px;
+    margin-bottom: 0;
+    height: 38px;
+    min-height: 38px;
     border-radius: 10px;
     background-color: rgba(255, 255, 255, 0.02);
     border-width: 1px;
@@ -348,4 +351,92 @@
 #unstagedScrollView .unity-list-view__item:hover,
 #stagedScrollView .unity-list-view__item:hover {
     background-color: rgba(255, 255, 255, 0.04);
+}
+
+.gitU-asset-item {
+    border-radius: 10px;
+    padding-left: 10px;
+    padding-right: 10px;
+    padding-top: 4px;
+    padding-bottom: 4px;
+    height: 38px;
+    min-height: 38px;
+    overflow: hidden;
+}
+
+.gitU-asset-row {
+    flex-direction: row;
+    align-items: center;
+    height: 100%;
+}
+
+.gitU-asset-text {
+    justify-content: center;
+}
+
+.gitU-asset-icon-container {
+    width: 30px;
+    height: 30px;
+    min-width: 30px;
+    min-height: 30px;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: rgba(255, 255, 255, 0.14);
+    background-color: rgba(255, 255, 255, 0.03);
+    justify-content: center;
+    align-items: center;
+    flex-shrink: 0;
+    margin-right: 8px;
+}
+
+.gitU-asset-icon {
+    width: 18px;
+    height: 18px;
+}
+
+.gitU-asset-path {
+    margin-top: 1px;
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.gitU-change-badge {
+    width: 24px;
+    height: 24px;
+    min-width: 24px;
+    min-height: 24px;
+    margin-left: 8px;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: rgba(255, 255, 255, 0.16);
+    background-color: rgba(255, 255, 255, 0.02);
+    justify-content: center;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.gitU-change-badge-label {
+    font-size: 12px;
+    -unity-font-style: bold;
+    color: rgba(255, 255, 255, 0.85);
+    unity-text-align: middle-center;
+}
+
+.gitU-asset-item--selected {
+    background-color: rgba(139, 92, 246, 0.26);
+    border-width: 1px;
+    border-color: rgba(139, 92, 246, 0.35);
+}
+
+#unstagedScrollView .unity-list-view__item.gitU-list-item--selected,
+#stagedScrollView .unity-list-view__item.gitU-list-item--selected {
+    background-color: rgba(139, 92, 246, 0.12);
+    border-color: rgba(139, 92, 246, 0.45);
+    border-left-width: 3px;
+    border-left-color: rgba(139, 92, 246, 0.85);
+}
+
+#unstagedScrollView .unity-list-view__item.gitU-list-item--selected:hover,
+#stagedScrollView .unity-list-view__item.gitU-list-item--selected:hover {
+    background-color: rgba(139, 92, 246, 0.16);
 }

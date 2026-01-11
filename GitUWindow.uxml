@@ -1,85 +1,66 @@
 <ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements" editor-extension-mode="False">
-    <Style src="GitUWindow.uss" />
-    <ui:VisualElement name="rootContainer" class="gitU-root">
-        <ui:VisualElement name="mainArea" class="main-area">
-            <ui:VisualElement name="headerCard" class="card top-card">
-                <ui:VisualElement class="top-bar">
-                    <ui:VisualElement class="title-block">
-                        <ui:Label text="GitU" class="app-title" />
-                        <ui:Label name="pathLabel" class="app-subtitle" />
-                    </ui:VisualElement>
-                    <ui:VisualElement class="status-block">
-                        <ui:Label text="Status:" class="status-title" />
-                        <ui:Button name="modifiedButton" text="修改 (M)" class="type-button" style="color: rgb(242, 191, 102);" />
-                        <ui:Button name="addedButton" text="新增 (A)" class="type-button" style="color: rgb(128, 217, 128);" />
-                        <ui:Button name="deletedButton" text="删除 (D)" class="type-button" style="color: rgb(230, 128, 128);" />
-                    </ui:VisualElement>
-                </ui:VisualElement>
-                <ui:VisualElement class="target-row">
-                    <uie:ObjectField name="targetField" label="目标资源" class="target-field" />
-                    <ui:Button name="refreshButton" text="刷新" class="primary-button refresh-button" />
-                </ui:VisualElement>
-                <ui:Label name="saveToDiskHintLabel" class="hint-text save-hint" />
-                <ui:Label name="statusLabel" class="status-text" />
+    <Style src="project://database/Assets/Editor/GitU/GitUWindow.uss?fileID=7433441132597879392&amp;guid=686ea87d79b4c0f4c9bd7149f836e4f9&amp;type=3#GitUWindow" />
+    <ui:VisualElement name="rootContainer" class="gitU-root" style="padding-top: 0; padding-right: 0; padding-bottom: 0; padding-left: 0; justify-content: flex-start; flex-grow: 1; flex-shrink: 0; height: auto; width: auto;">
+        <ui:VisualElement name="headerCard" class="card top-card" style="flex-direction: row; flex-grow: 0; margin-top: 0; margin-right: 0; margin-bottom: 0; margin-left: 0; padding-top: 0; padding-right: 0; padding-bottom: 0; padding-left: 0; align-items: center; border-top-left-radius: 0; border-top-right-radius: 0; border-bottom-right-radius: 0; border-bottom-left-radius: 0; height: 50px; border-top-width: 0; border-right-width: 0; border-left-width: 0; justify-content: space-between; flex-shrink: 1;">
+            <ui:VisualElement class="target-row" style="flex-shrink: 1; margin-top: 0; flex-grow: 0; margin-left: 10px;">
+                <uie:ObjectField name="targetField" label="目标资源" class="target-field" style="flex-grow: 0; flex-shrink: 1; margin-right: 2px; margin-left: 2px; height: auto; border-top-left-radius: 0; border-top-right-radius: 0; border-bottom-right-radius: 0; border-bottom-left-radius: 0;" />
+                <ui:Button name="refreshButton" text="刷新" class="primary-button refresh-button" style="height: 22px; width: 70px; border-top-left-radius: 4px; border-top-right-radius: 4px; border-bottom-right-radius: 4px; border-bottom-left-radius: 4px; margin-right: 2px; margin-left: 2px; padding-right: 2px; padding-left: 2px;" />
+                <ui:VisualElement name="fengexian1" style="flex-shrink: 0; height: 10px; margin-right: 8px; margin-left: 8px; width: 1px; background-color: rgba(255, 255, 255, 0.12);" />
             </ui:VisualElement>
-
-            <ui:VisualElement name="filterBox" class="card toolbar-card">
-                <ui:VisualElement class="toolbar-row">
-                    <ui:VisualElement class="toolbar-left">
-                        <ui:Label text="File Types" class="toolbar-label" />
-                        <uie:ToolbarMenu name="assetTypeMenu" class="toolbar-dropdown" />
-                    </ui:VisualElement>
-                    <ui:TextField name="searchField" label="" tooltip="Search files, paths, or changes..." class="search-field" />
+            <ui:VisualElement class="top-bar" style="flex-grow: 0; flex-shrink: 0; flex-direction: row;">
+                <ui:VisualElement class="status-block">
+                    <ui:Button name="modifiedButton" text="修改 (M)" class="type-button" style="color: rgb(242, 191, 102); margin-left: 4px; margin-right: 2px; border-top-left-radius: 4px; border-top-right-radius: 4px; border-bottom-right-radius: 4px; border-bottom-left-radius: 4px; height: 22px; width: 70px;" />
+                    <ui:Button name="addedButton" text="新增 (A)" class="type-button" style="color: rgb(128, 217, 128); margin-right: 2px; margin-left: 2px; border-top-left-radius: 4px; border-top-right-radius: 4px; border-bottom-right-radius: 4px; border-bottom-left-radius: 4px; height: 22px; width: 70px;" />
+                    <ui:Button name="deletedButton" text="删除 (D)" class="type-button" style="color: rgb(230, 128, 128); border-top-left-radius: 4px; border-top-right-radius: 4px; border-bottom-right-radius: 4px; border-bottom-left-radius: 4px; margin-right: 2px; margin-left: 2px; height: 22px; width: 70px;" />
+                    <ui:VisualElement name="fengexian" style="flex-shrink: 0; height: 10px; margin-right: 2px; margin-left: 2px; width: 1px; background-color: rgba(255, 255, 255, 0.12);" />
+                    <ui:Button text="S" display-tooltip-when-elided="true" name="Setting" style="height: 22px; width: 22px; margin-left: 2px; margin-right: 10px; border-top-left-radius: 4px; border-top-right-radius: 4px; border-bottom-right-radius: 4px; border-bottom-left-radius: 4px;" />
                 </ui:VisualElement>
             </ui:VisualElement>
-
-            <ui:VisualElement name="middleRow" class="split-view">
+        </ui:VisualElement>
+        <ui:VisualElement name="filterBox" class="card toolbar-card" style="margin-top: 10px; margin-right: 10px; margin-bottom: 10px; margin-left: 10px; padding-top: 0; padding-right: 0; padding-bottom: 0; padding-left: 0; flex-shrink: 1; flex-direction: row; height: 44px; align-items: center; border-top-left-radius: 8px; border-top-right-radius: 8px; border-bottom-right-radius: 8px; border-bottom-left-radius: 8px; background-color: rgb(18, 18, 18); justify-content: space-between; flex-grow: 0;">
+            <ui:VisualElement class="toolbar-left" style="flex-shrink: 1; width: 150px; flex-grow: 0; margin-left: 10px; margin-right: 5px;">
+                <uie:ToolbarMenu name="assetTypeMenu" class="toolbar-dropdown" style="padding-top: 0; padding-right: 5px; padding-bottom: 0; padding-left: 0; margin-left: 0; margin-top: 0; margin-right: 0; margin-bottom: 0; height: 22px; border-top-width: 0; border-right-width: 0; border-bottom-width: 0; border-left-width: 0; border-top-left-radius: 4px; border-top-right-radius: 4px; border-bottom-right-radius: 4px; border-bottom-left-radius: 4px; width: 140px;" />
+            </ui:VisualElement>
+            <ui:TextField name="searchField" tooltip="Search files, paths, or changes..." class="search-field" style="margin-top: 0; margin-right: 5px; margin-bottom: 0; margin-left: 5px; border-top-left-radius: 0; border-top-right-radius: 0; border-bottom-right-radius: 0; border-bottom-left-radius: 0; flex-grow: 1; flex-shrink: 1;" />
+            <uie:ToolbarMenu name="assetTypeMenu" class="toolbar-dropdown" style="padding-top: 0; padding-right: 5px; padding-bottom: 0; padding-left: 0; margin-left: 0; margin-top: 0; margin-right: 0; margin-bottom: 0; height: 22px; border-top-width: 0; border-right-width: 0; border-bottom-width: 0; border-left-width: 0; border-top-left-radius: 4px; border-top-right-radius: 4px; border-bottom-right-radius: 4px; border-bottom-left-radius: 4px; width: 140px;" />
+            <ui:Button text="上" display-tooltip-when-elided="true" style="height: 22px; width: 22px; margin-right: 4px; margin-left: 4px; padding-right: 2px; padding-left: 2px;" />
+        </ui:VisualElement>
+        <ui:VisualElement name="mainArea" class="main-area" style="height: 620px; flex-shrink: 0;">
+            <ui:VisualElement name="middleRow" class="split-view" style="justify-content: space-between; margin-bottom: 0; margin-left: 10px; margin-right: 10px; width: auto;">
                 <ui:VisualElement name="leftColumn" class="panel left-panel">
                     <ui:VisualElement name="unstagedHeaderRow" class="panel-header">
-                        <ui:VisualElement name="unstagedSelectContainer" class="row select-container">
-                            <ui:Toggle name="unstagedSelectAllToggle" class="select-toggle" />
-                            <ui:Label text="UNSTAGED CHANGES" class="panel-title" />
-                        </ui:VisualElement>
+                        <ui:Label text="UNSTAGED CHANGES" class="panel-title" style="-unity-text-align: middle-left;" />
                         <ui:Label name="unstagedHeaderLabel" class="panel-right" />
                     </ui:VisualElement>
                     <ui:ListView name="unstagedScrollView" class="panel-list" />
                 </ui:VisualElement>
-
-                <ui:VisualElement name="middleColumn" class="middle-column">
-                    <ui:Button name="toStagedButton" text="&gt;" class="arrow-button" />
-                    <ui:Button name="toUnstagedButton" text="&lt;" class="arrow-button" />
-                </ui:VisualElement>
-
                 <ui:VisualElement name="rightColumn" class="panel right-panel">
                     <ui:VisualElement name="stagedHeaderRow" class="panel-header">
-                        <ui:VisualElement name="stagedSelectContainer" class="row select-container">
-                            <ui:Toggle name="stagedSelectAllToggle" class="select-toggle" />
-                            <ui:Label text="STAGED CHANGES" class="panel-title" />
-                        </ui:VisualElement>
+                        <ui:Label text="STAGED CHANGES" class="panel-title" style="-unity-text-align: middle-left;" />
                         <ui:Label name="stagedHeaderLabel" class="panel-right" />
                     </ui:VisualElement>
                     <ui:ListView name="stagedScrollView" class="panel-list" />
                 </ui:VisualElement>
             </ui:VisualElement>
         </ui:VisualElement>
-
-        <ui:VisualElement name="commitBox" class="card commit-card">
-            <ui:Label name="repositoryStatusLabel" enableRichText="true" class="repo-status" />
-            <ui:VisualElement name="commitMessageRow" class="row commit-message-row">
-                <ui:TextField name="commitMessageField" label="Commit Message" class="text-field-grow commit-field" />
-                <ui:Button name="historyButton" text="记录" class="history-button" />
+        <ui:Label name="repositoryStatusLabel" enableRichText="true" class="repo-status" style="margin-bottom: 10px; margin-right: 10px; margin-left: 10px; margin-top: 10px;" />
+        <ui:VisualElement name="commitBox" class="card commit-card" style="padding-top: 0; padding-right: 0; padding-bottom: 0; padding-left: 0; flex-grow: 0; height: 120px; margin-top: 10px; margin-right: 10px; margin-bottom: 10px; margin-left: 10px;">
+            <ui:VisualElement name="commitMessageRow" class="row commit-message-row" style="flex-shrink: 0;">
+                <ui:TextField name="commitMessageField" label="Commit Message" class="text-field-grow commit-field" style="flex-grow: 1; flex-shrink: 0; height: auto; flex-direction: column; margin-top: 10px; margin-right: 10px; margin-left: 10px; margin-bottom: 0;" />
             </ui:VisualElement>
-            <ui:VisualElement name="commitRow" class="row commit-row">
-                <ui:VisualElement class="commit-spacer" />
-                <ui:Button name="commitButton" text="提交到本地" class="commit-button-local" />
-                <ui:Button name="commitAndPushButton" text="提交并推送" class="commit-button-push" />
+            <ui:VisualElement name="commitRow" class="row commit-row" style="justify-content: space-between;">
+                <ui:Button name="historyButton" text="记录" class="history-button" style="border-top-left-radius: 4px; border-top-right-radius: 4px; border-bottom-right-radius: 4px; border-bottom-left-radius: 4px; margin-right: 4px; height: 28px; width: 80px; padding-top: 0; padding-right: 0; padding-bottom: 0; padding-left: 0;" />
+                <ui:VisualElement class="commit-spacer" style="flex-direction: row; flex-grow: 0; flex-shrink: 0; justify-content: space-between;">
+                    <ui:Button name="commitButton" text="提交到本地" class="commit-button-local" style="margin-left: 4px; margin-right: 4px; border-top-left-radius: 6px; border-top-right-radius: 6px; border-bottom-right-radius: 6px; border-bottom-left-radius: 6px;" />
+                    <ui:Button name="commitAndPushButton" text="提交并推送" class="commit-button-push" style="margin-right: 10px; margin-left: 4px; border-top-left-radius: 6px; border-top-right-radius: 6px; border-bottom-right-radius: 6px; border-bottom-left-radius: 6px;" />
+                </ui:VisualElement>
             </ui:VisualElement>
         </ui:VisualElement>
-
         <ui:VisualElement name="historyDropdown" class="history-modal">
             <ui:ListView name="historyListView" style="flex-grow: 1;" />
         </ui:VisualElement>
-
-        <ui:Label name="toastLabel" class="toast" />
+        <ui:Label name="saveToDiskHintLabel" class="hint-text save-hint" style="padding-top: 0; padding-right: 0; padding-bottom: 0; padding-left: 0; margin-top: 0; margin-right: 10px; margin-bottom: 0; margin-left: 10px; flex-shrink: 1; flex-grow: 0; height: 20px; justify-content: flex-start; -unity-text-align: middle-left;" />
+        <ui:Label name="statusLabel" class="status-text" style="flex-shrink: 1; flex-grow: 0; height: 20px; margin-top: 0; margin-right: 10px; margin-bottom: 0; margin-left: 10px; padding-top: 0; padding-right: 0; padding-bottom: 0; padding-left: 0; -unity-text-align: middle-left;" />
+        <ui:Label name="toastLabel" text="0" class="toast" />
     </ui:VisualElement>
 </ui:UXML>

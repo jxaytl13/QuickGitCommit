@@ -126,6 +126,9 @@ namespace TLNexus.GitU
         private List<string> savedCommitHistory;
         private List<string> fallbackCommitHistory;
         private bool historyDropdownVisible;
+        private int unstagedSelectionAnchorIndex = -1;
+        private int stagedSelectionAnchorIndex = -1;
+        private bool? lastActiveStagedView;
 
         // UI Toolkit elements
         private ObjectField targetField;
@@ -146,13 +149,9 @@ namespace TLNexus.GitU
         private Button commitAndPushButton;
         private Button historyButton;
         private Button refreshButton;
-        private Button toStagedButton;
-        private Button toUnstagedButton;
         private VisualElement historyDropdown;
         private ListView historyListView;
         private Label repositoryStatusLabel;
-        private Toggle unstagedSelectAllToggle;
-        private Toggle stagedSelectAllToggle;
         private Label toastLabel;
 
         private VisualElement leftColumn;
@@ -172,11 +171,17 @@ namespace TLNexus.GitU
         private sealed class AssetRowRefs
         {
             public bool StagedView;
-            public Toggle SelectToggle;
+            public Image IconImage;
             public Label NameLabel;
-            public Label TimeLabel;
             public Label PathLabel;
+            public VisualElement ChangeBadgeContainer;
+            public Label ChangeBadgeLabel;
             public GitAssetInfo Info;
+            public int BoundIndex;
+
+            public bool DragArmed;
+            public Vector3 DragStartPosition;
+            public int DragPointerId;
         }
 
         // Notification
@@ -729,52 +734,6 @@ namespace TLNexus.GitU
             {
                 refreshButton.clicked += () => { RequestRefreshData(false); };
             }
-            if (unstagedSelectAllToggle != null)
-            {
-                unstagedSelectAllToggle.RegisterValueChangedCallback(evt =>
-                {
-                    if (evt.newValue)
-                    {
-                        selectedUnstagedPaths.Clear();
-                        foreach (var info in EnumerateFilteredAssets(false))
-                        {
-                            selectedUnstagedPaths.Add(info.AssetPath);
-                        }
-                    }
-                    else
-                    {
-                        selectedUnstagedPaths.Clear();
-                    }
-                    unstagedScrollView?.RefreshItems();
-                });
-            }
-            if (stagedSelectAllToggle != null)
-            {
-                stagedSelectAllToggle.RegisterValueChangedCallback(evt =>
-                {
-                    if (evt.newValue)
-                    {
-                        selectedStagedPaths.Clear();
-                        foreach (var info in EnumerateFilteredAssets(true))
-                        {
-                            selectedStagedPaths.Add(info.AssetPath);
-                        }
-                    }
-                    else
-                    {
-                        selectedStagedPaths.Clear();
-                    }
-                    stagedScrollView?.RefreshItems();
-                });
-            }
-            if (toStagedButton != null)
-            {
-                toStagedButton.clicked += () => { StageSelectedUnstaged(); };
-            }
-            if (toUnstagedButton != null)
-            {
-                toUnstagedButton.clicked += () => { UnstageSelectedStaged(); };
-            }
             if (commitMessageField != null)
             {
                 commitMessageField.value = commitMessage;
@@ -806,6 +765,7 @@ namespace TLNexus.GitU
                 historyListView.onSelectionChange += OnHistoryListSelectionChanged;
             }
             root.RegisterCallback<MouseDownEvent>(OnRootMouseDown, TrickleDown.TrickleDown);
+            root.RegisterCallback<KeyDownEvent>(OnRootKeyDown, TrickleDown.TrickleDown);
             UpdateHistoryButtonState();
             if (commitButton != null)
             {
@@ -1095,13 +1055,9 @@ namespace TLNexus.GitU
             commitAndPushButton = root.Q<Button>("commitAndPushButton");
             historyButton = root.Q<Button>("historyButton");
             refreshButton = root.Q<Button>("refreshButton");
-            toStagedButton = root.Q<Button>("toStagedButton");
-            toUnstagedButton = root.Q<Button>("toUnstagedButton");
             historyDropdown = root.Q<VisualElement>("historyDropdown");
             historyListView = root.Q<ListView>("historyListView");
             repositoryStatusLabel = root.Q<Label>("repositoryStatusLabel");
-            unstagedSelectAllToggle = root.Q<Toggle>("unstagedSelectAllToggle");
-            stagedSelectAllToggle = root.Q<Toggle>("stagedSelectAllToggle");
             leftColumn = root.Q<VisualElement>("leftColumn");
             toastLabel = root.Q<Label>("toastLabel");
         }
@@ -1172,10 +1128,23 @@ namespace TLNexus.GitU
 
         private void StageSelectedUnstaged()
         {
-            var paths = selectedUnstagedPaths.ToList();
-            if (paths.Count == 0)
+            if (selectedUnstagedPaths.Count == 0)
             {
                 ShowTempNotification("请先在左侧勾选要发送的变更。");
+                return;
+            }
+
+            StageAssetPaths(selectedUnstagedPaths.ToList());
+        }
+
+        private void StageAssetPaths(List<string> assetPaths)
+        {
+            assetPaths ??= new List<string>();
+            assetPaths.RemoveAll(string.IsNullOrWhiteSpace);
+
+            if (assetPaths.Count == 0)
+            {
+                ShowTempNotification("当前没有可发送的变更。");
                 return;
             }
 
@@ -1185,8 +1154,9 @@ namespace TLNexus.GitU
                 return;
             }
 
+            var pathSet = new HashSet<string>(assetPaths, StringComparer.OrdinalIgnoreCase);
             var toStage = assetInfos
-                .Where(a => !a.IsStaged && a.IsUnstaged && selectedUnstagedPaths.Contains(a.AssetPath))
+                .Where(a => !a.IsStaged && a.IsUnstaged && pathSet.Contains(a.AssetPath))
                 .ToList();
 
             if (toStage.Count == 0)
@@ -1270,10 +1240,23 @@ namespace TLNexus.GitU
 
         private void UnstageSelectedStaged()
         {
-            var paths = selectedStagedPaths.ToList();
-            if (paths.Count == 0)
+            if (selectedStagedPaths.Count == 0)
             {
                 ShowTempNotification("请先在右侧勾选要移出的变更。");
+                return;
+            }
+
+            UnstageAssetPaths(selectedStagedPaths.ToList());
+        }
+
+        private void UnstageAssetPaths(List<string> assetPaths)
+        {
+            assetPaths ??= new List<string>();
+            assetPaths.RemoveAll(string.IsNullOrWhiteSpace);
+
+            if (assetPaths.Count == 0)
+            {
+                ShowTempNotification("当前没有可移出的待提交项。");
                 return;
             }
 
@@ -1283,8 +1266,9 @@ namespace TLNexus.GitU
                 return;
             }
 
+            var pathSet = new HashSet<string>(assetPaths, StringComparer.OrdinalIgnoreCase);
             var toUnstage = assetInfos
-                .Where(a => a.IsStaged && selectedStagedPaths.Contains(a.AssetPath))
+                .Where(a => a.IsStaged && pathSet.Contains(a.AssetPath))
                 .ToList();
 
             if (toUnstage.Count == 0)
@@ -1417,18 +1401,6 @@ namespace TLNexus.GitU
             if (stagedHeaderLabel != null)
             {
                 stagedHeaderLabel.text = $"\u5f85\u63d0\u4ea4\uff08\u5df2\u6682\u5b58\uff09\uff1a{visibleStagedItems.Count} \u9879";
-            }
-
-            if (unstagedSelectAllToggle != null)
-            {
-                var allSelected = visibleUnstagedItems.Count > 0 && visibleUnstagedItems.All(i => selectedUnstagedPaths.Contains(i.AssetPath));
-                unstagedSelectAllToggle.SetValueWithoutNotify(allSelected);
-            }
-
-            if (stagedSelectAllToggle != null)
-            {
-                var allSelected = visibleStagedItems.Count > 0 && visibleStagedItems.All(i => selectedStagedPaths.Contains(i.AssetPath));
-                stagedSelectAllToggle.SetValueWithoutNotify(allSelected);
             }
 
             if (touchedUnstaged)
@@ -2314,6 +2286,60 @@ namespace TLNexus.GitU
             HideHistoryDropdown();
         }
 
+        private void OnRootKeyDown(KeyDownEvent evt)
+        {
+            if (!evt.actionKey || evt.keyCode != KeyCode.A)
+            {
+                return;
+            }
+
+            var focused = rootVisualElement?.focusController?.focusedElement as VisualElement;
+            if (focused != null)
+            {
+                if (IsDescendantOf(focused, searchField) ||
+                    IsDescendantOf(focused, commitMessageField) ||
+                    IsDescendantOf(focused, targetField))
+                {
+                    return;
+                }
+            }
+
+            bool? targetView = lastActiveStagedView;
+
+            if (!targetView.HasValue && focused != null)
+            {
+                if (IsDescendantOf(focused, stagedScrollView))
+                {
+                    targetView = true;
+                }
+                else if (IsDescendantOf(focused, unstagedScrollView))
+                {
+                    targetView = false;
+                }
+            }
+
+            if (!targetView.HasValue)
+            {
+                if (selectedStagedPaths.Count > 0)
+                {
+                    targetView = true;
+                }
+                else if (selectedUnstagedPaths.Count > 0)
+                {
+                    targetView = false;
+                }
+            }
+
+            if (!targetView.HasValue)
+            {
+                return;
+            }
+
+            SelectAllInView(targetView.Value);
+            evt.StopPropagation();
+            evt.PreventDefault();
+        }
+
         private static bool IsDescendantOf(VisualElement element, VisualElement ancestor)
         {
             while (element != null)
@@ -2706,16 +2732,6 @@ namespace TLNexus.GitU
         {
             var busy = refreshInProgress || gitOperationInProgress;
 
-            if (toStagedButton != null)
-            {
-                toStagedButton.SetEnabled(!busy);
-            }
-
-            if (toUnstagedButton != null)
-            {
-                toUnstagedButton.SetEnabled(!busy);
-            }
-
             // 这两个按钮不应随 Git 操作频繁禁用/启用，否则视觉上会“闪一下”
             //（看起来像被程序点击/操控）；它们的动作要么只是本地筛选，要么会自动排队刷新。
             if (refreshButton != null)
@@ -2767,18 +2783,6 @@ namespace TLNexus.GitU
             if (stagedHeaderLabel != null)
             {
                 stagedHeaderLabel.text = $"\u5f85\u63d0\u4ea4\uff08\u5df2\u6682\u5b58\uff09\uff1a{staged.Count} \u9879";
-            }
-
-            if (unstagedSelectAllToggle != null)
-            {
-                var allSelected = unstaged.Count > 0 && unstaged.All(i => selectedUnstagedPaths.Contains(i.AssetPath));
-                unstagedSelectAllToggle.SetValueWithoutNotify(allSelected);
-            }
-
-            if (stagedSelectAllToggle != null)
-            {
-                var allSelected = staged.Count > 0 && staged.All(i => selectedStagedPaths.Contains(i.AssetPath));
-                stagedSelectAllToggle.SetValueWithoutNotify(allSelected);
             }
 
             var isEmpty = unstaged.Count == 0 && staged.Count == 0;
@@ -2899,14 +2903,17 @@ namespace TLNexus.GitU
             listView.selectionType = SelectionType.None;
 #if UNITY_2021_2_OR_NEWER
             listView.virtualizationMethod = CollectionVirtualizationMethod.FixedHeight;
-            listView.fixedItemHeight = 54;
+            listView.fixedItemHeight = 38;
             listView.reorderable = false;
 #else
-            listView.itemHeight = 54;
+            listView.itemHeight = 38;
 #endif
 
             listView.makeItem = () => CreateAssetRowTemplate(stagedView);
             listView.bindItem = (e, i) => BindAssetRow(e, i, stagedView);
+
+            listView.RegisterCallback<DragUpdatedEvent>(evt => OnListDragUpdated(evt, stagedView));
+            listView.RegisterCallback<DragPerformEvent>(evt => OnListDragPerform(evt, stagedView));
         }
 
         private void UpdateListView(ListView listView, List<GitAssetInfo> items, ref int lastCount)
@@ -2928,28 +2935,82 @@ namespace TLNexus.GitU
             listView.RefreshItems();
         }
 
+        private const string DragPayloadKey = "TLNexus.GitU.DragPayload";
+
+        private sealed class DragPayload
+        {
+            public bool SourceStaged;
+            public List<string> AssetPaths;
+        }
+
+        private void OnListDragUpdated(DragUpdatedEvent evt, bool targetStaged)
+        {
+            var payload = DragAndDrop.GetGenericData(DragPayloadKey) as DragPayload;
+            if (payload == null || payload.AssetPaths == null || payload.AssetPaths.Count == 0)
+            {
+                return;
+            }
+
+            DragAndDrop.visualMode = payload.SourceStaged == targetStaged
+                ? DragAndDropVisualMode.Rejected
+                : DragAndDropVisualMode.Move;
+
+            evt.StopPropagation();
+        }
+
+        private void OnListDragPerform(DragPerformEvent evt, bool targetStaged)
+        {
+            var payload = DragAndDrop.GetGenericData(DragPayloadKey) as DragPayload;
+            if (payload == null || payload.AssetPaths == null || payload.AssetPaths.Count == 0)
+            {
+                return;
+            }
+
+            if (payload.SourceStaged == targetStaged)
+            {
+                return;
+            }
+
+            DragAndDrop.AcceptDrag();
+            DragAndDrop.SetGenericData(DragPayloadKey, null);
+
+            if (targetStaged)
+            {
+                StageAssetPaths(payload.AssetPaths);
+            }
+            else
+            {
+                UnstageAssetPaths(payload.AssetPaths);
+            }
+
+            evt.StopPropagation();
+        }
+
         private VisualElement CreateAssetRowTemplate(bool stagedView)
         {
             var container = new VisualElement();
+            container.AddToClassList("gitU-asset-item");
             container.style.flexDirection = FlexDirection.Column;
-            container.style.paddingLeft = 4;
-            container.style.paddingRight = 4;
-            container.style.paddingTop = 4;
-            container.style.paddingBottom = 4;
-            container.style.borderBottomWidth = 1;
-            container.style.borderBottomColor = new Color(0.2f, 0.2f, 0.2f, 1f);
+            container.style.flexGrow = 1f;
+            container.style.flexShrink = 1f;
+            container.style.alignSelf = Align.Stretch;
+            container.style.minWidth = 0;
 
             var row = new VisualElement();
+            row.AddToClassList("gitU-asset-row");
             row.style.flexDirection = FlexDirection.Row;
-            row.style.alignItems = Align.FlexStart;
 
-            var selectToggle = new Toggle();
-            selectToggle.style.width = 16;
-            selectToggle.style.marginRight = 4;
-            selectToggle.style.marginTop = 2;
-            row.Add(selectToggle);
+            var iconContainer = new VisualElement();
+            iconContainer.AddToClassList("gitU-asset-icon-container");
+            row.Add(iconContainer);
+
+            var iconImage = new Image();
+            iconImage.AddToClassList("gitU-asset-icon");
+            iconImage.scaleMode = ScaleMode.ScaleToFit;
+            iconContainer.Add(iconImage);
 
             var namePathColumn = new VisualElement();
+            namePathColumn.AddToClassList("gitU-asset-text");
             namePathColumn.style.flexDirection = FlexDirection.Column;
             namePathColumn.style.flexGrow = 1f;
             namePathColumn.style.flexShrink = 1f;
@@ -2957,6 +3018,7 @@ namespace TLNexus.GitU
             row.Add(namePathColumn);
 
             var nameLabel = new Label();
+            nameLabel.AddToClassList("gitU-asset-name");
             nameLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
             nameLabel.style.whiteSpace = WhiteSpace.NoWrap;
             nameLabel.style.overflow = Overflow.Hidden;
@@ -2964,49 +3026,93 @@ namespace TLNexus.GitU
             namePathColumn.Add(nameLabel);
 
             var pathInfoLabel = new Label();
-            pathInfoLabel.style.marginTop = 2;
-            pathInfoLabel.style.fontSize = 10;
-            pathInfoLabel.style.color = new Color(1f, 1f, 1f, 0.55f);
+            pathInfoLabel.AddToClassList("gitU-asset-path");
             pathInfoLabel.style.whiteSpace = WhiteSpace.NoWrap;
             pathInfoLabel.style.overflow = Overflow.Hidden;
             pathInfoLabel.style.textOverflow = TextOverflow.Ellipsis;
             namePathColumn.Add(pathInfoLabel);
 
-            var rightColumn = new VisualElement();
-            rightColumn.style.flexDirection = FlexDirection.Column;
-            rightColumn.style.alignItems = Align.FlexEnd;
-            rightColumn.style.flexShrink = 0;
-            rightColumn.style.marginLeft = 8;
-            row.Add(rightColumn);
+            var changeBadgeContainer = new VisualElement();
+            changeBadgeContainer.AddToClassList("gitU-change-badge");
+            row.Add(changeBadgeContainer);
 
-            var timeLabel = new Label();
-            timeLabel.style.fontSize = 10;
-            timeLabel.style.color = new Color(1f, 1f, 1f, 0.6f);
-            timeLabel.style.unityTextAlign = TextAnchor.UpperRight;
-            rightColumn.Add(timeLabel);
-
-            Button discardButton = null;
-            if (!stagedView)
-            {
-                discardButton = new Button { text = "放弃更改" };
-                discardButton.style.marginTop = 6;
-                discardButton.style.alignSelf = Align.FlexEnd;
-                rightColumn.Add(discardButton);
-            }
+            var changeBadgeLabel = new Label();
+            changeBadgeLabel.AddToClassList("gitU-change-badge-label");
+            changeBadgeContainer.Add(changeBadgeLabel);
 
             container.Add(row);
 
             var refs = new AssetRowRefs
             {
                 StagedView = stagedView,
-                SelectToggle = selectToggle,
+                IconImage = iconImage,
                 NameLabel = nameLabel,
-                TimeLabel = timeLabel,
-                PathLabel = pathInfoLabel
+                PathLabel = pathInfoLabel,
+                ChangeBadgeContainer = changeBadgeContainer,
+                ChangeBadgeLabel = changeBadgeLabel
             };
             container.userData = refs;
 
-            selectToggle.RegisterValueChangedCallback(evt =>
+            row.RegisterCallback<PointerDownEvent>(evt =>
+            {
+                if (evt.button == 1)
+                {
+                    var info = refs.Info;
+                    if (info == null || string.IsNullOrEmpty(info.AssetPath))
+                    {
+                        return;
+                    }
+
+                    var set = stagedView ? selectedStagedPaths : selectedUnstagedPaths;
+                    if (!set.Contains(info.AssetPath))
+                    {
+                        HandleRowSelection(stagedView, info, refs.BoundIndex, shift: false, actionKey: false);
+                    }
+
+                    return;
+                }
+
+                if (evt.button != 0)
+                {
+                    return;
+                }
+
+                HandleRowSelection(stagedView, refs.Info, refs.BoundIndex, evt.shiftKey, evt.actionKey);
+
+                refs.DragArmed = true;
+                refs.DragStartPosition = evt.position;
+                refs.DragPointerId = evt.pointerId;
+            });
+
+            row.RegisterCallback<PointerMoveEvent>(evt =>
+            {
+                if (!refs.DragArmed || evt.pointerId != refs.DragPointerId)
+                {
+                    return;
+                }
+
+                var delta = evt.position - refs.DragStartPosition;
+                if (delta.sqrMagnitude < 64f)
+                {
+                    return;
+                }
+
+                refs.DragArmed = false;
+
+                TryStartDrag(stagedView, refs.Info, refs.BoundIndex);
+            });
+
+            row.RegisterCallback<PointerUpEvent>(evt =>
+            {
+                if (evt.pointerId != refs.DragPointerId)
+                {
+                    return;
+                }
+
+                refs.DragArmed = false;
+            });
+
+            row.RegisterCallback<ContextualMenuPopulateEvent>(evt =>
             {
                 var info = refs.Info;
                 if (info == null || string.IsNullOrEmpty(info.AssetPath))
@@ -3014,15 +3120,18 @@ namespace TLNexus.GitU
                     return;
                 }
 
-                var targetSet = stagedView ? selectedStagedPaths : selectedUnstagedPaths;
-                if (evt.newValue)
+                var set = stagedView ? selectedStagedPaths : selectedUnstagedPaths;
+                if (!set.Contains(info.AssetPath))
                 {
-                    targetSet.Add(info.AssetPath);
+                    HandleRowSelection(stagedView, info, refs.BoundIndex, shift: false, actionKey: false);
                 }
-                else
-                {
-                    targetSet.Remove(info.AssetPath);
-                }
+
+                evt.menu.AppendAction(
+                    "\u653e\u5f03\u66f4\u6539",
+                    _ => ConfirmDiscardSelected(stagedView),
+                    _ => (stagedView ? selectedStagedPaths.Count : selectedUnstagedPaths.Count) > 0
+                        ? DropdownMenuAction.Status.Normal
+                        : DropdownMenuAction.Status.Disabled);
             });
 
             nameLabel.RegisterCallback<ClickEvent>(evt =>
@@ -3064,21 +3173,222 @@ namespace TLNexus.GitU
                 }
             });
 
-            if (discardButton != null)
-            {
-                discardButton.clicked += () =>
-                {
-                    var info = refs.Info;
-                    if (info == null)
-                    {
-                        return;
-                    }
+            return container;
+        }
 
-                    ConfirmDiscardChange(info);
-                };
+        private void ConfirmDiscardSelected(bool stagedView)
+        {
+            var set = stagedView ? selectedStagedPaths : selectedUnstagedPaths;
+            if (set.Count == 0)
+            {
+                return;
             }
 
-            return container;
+            var selectedInfos = assetInfos
+                .Where(i => i != null && !string.IsNullOrEmpty(i.AssetPath) && set.Contains(i.AssetPath))
+                .ToList();
+
+            if (selectedInfos.Count == 0)
+            {
+                return;
+            }
+
+            if (selectedInfos.Count == 1)
+            {
+                ConfirmDiscardChange(selectedInfos[0]);
+                return;
+            }
+
+            const int maxPreviewLines = 12;
+            var previewLines = selectedInfos
+                .Select(i => i.AssetPath)
+                .Where(p => !string.IsNullOrEmpty(p))
+                .Take(maxPreviewLines)
+                .ToList();
+            var overflow = selectedInfos.Count - previewLines.Count;
+            var preview = string.Join("\n", previewLines);
+            if (overflow > 0)
+            {
+                preview += $"\n... 以及 {overflow} 项";
+            }
+
+            var confirmed = EditorUtility.DisplayDialog(
+                "\u653e\u5f03\u66f4\u6539",
+                $"\u786e\u5b9a\u653e\u5f03\u9009\u4e2d\u7684 {selectedInfos.Count} \u9879\u66f4\u6539\uff1f\n\n{preview}\n\n\u6b64\u64cd\u4f5c\u4e0d\u53ef\u64a4\u9500\u3002",
+                "\u653e\u5f03",
+                "\u53d6\u6d88");
+            if (!confirmed)
+            {
+                return;
+            }
+
+            var success = GitUtility.DiscardChanges(selectedInfos, out var summary);
+            if (success)
+            {
+                RequestAssetDatabaseRefreshAndRefreshData();
+                ShowTempNotification(string.IsNullOrEmpty(summary) ? "\u5df2\u653e\u5f03\u66f4\u6539\u3002" : summary);
+            }
+            else
+            {
+                ShowTempNotification(string.IsNullOrEmpty(summary) ? "\u653e\u5f03\u66f4\u6539\u5931\u8d25\u3002" : summary);
+            }
+        }
+
+        private void HandleRowSelection(bool stagedView, GitAssetInfo info, int index, bool shift, bool actionKey)
+        {
+            if (info == null || string.IsNullOrEmpty(info.AssetPath))
+            {
+                return;
+            }
+
+            if (index < 0)
+            {
+                shift = false;
+            }
+
+            var thisSet = stagedView ? selectedStagedPaths : selectedUnstagedPaths;
+            var otherSet = stagedView ? selectedUnstagedPaths : selectedStagedPaths;
+            if (otherSet.Count > 0)
+            {
+                otherSet.Clear();
+            }
+
+            if (shift)
+            {
+                var list = stagedView ? visibleStagedItems : visibleUnstagedItems;
+                if (list == null || list.Count == 0)
+                {
+                    return;
+                }
+
+                var anchor = stagedView ? stagedSelectionAnchorIndex : unstagedSelectionAnchorIndex;
+                if (anchor < 0 || anchor >= list.Count)
+                {
+                    anchor = index;
+                }
+
+                var min = Math.Min(anchor, index);
+                var max = Math.Max(anchor, index);
+
+                if (!actionKey)
+                {
+                    thisSet.Clear();
+                }
+
+                for (var i = min; i <= max; i++)
+                {
+                    var item = list[i];
+                    if (item != null && !string.IsNullOrEmpty(item.AssetPath))
+                    {
+                        thisSet.Add(item.AssetPath);
+                    }
+                }
+            }
+            else if (actionKey)
+            {
+                if (!thisSet.Add(info.AssetPath))
+                {
+                    thisSet.Remove(info.AssetPath);
+                }
+
+                if (thisSet.Count == 0)
+                {
+                    if (stagedView)
+                    {
+                        stagedSelectionAnchorIndex = -1;
+                    }
+                    else
+                    {
+                        unstagedSelectionAnchorIndex = -1;
+                    }
+                }
+            }
+            else
+            {
+                thisSet.Clear();
+                thisSet.Add(info.AssetPath);
+            }
+
+            if (stagedView)
+            {
+                stagedSelectionAnchorIndex = index;
+            }
+            else
+            {
+                unstagedSelectionAnchorIndex = index;
+            }
+
+            lastActiveStagedView = stagedView;
+            unstagedScrollView?.RefreshItems();
+            stagedScrollView?.RefreshItems();
+        }
+
+        private void SelectAllInView(bool stagedView)
+        {
+            var list = stagedView ? visibleStagedItems : visibleUnstagedItems;
+            if (list == null || list.Count == 0)
+            {
+                return;
+            }
+
+            var thisSet = stagedView ? selectedStagedPaths : selectedUnstagedPaths;
+            var otherSet = stagedView ? selectedUnstagedPaths : selectedStagedPaths;
+
+            if (otherSet.Count > 0)
+            {
+                otherSet.Clear();
+            }
+
+            thisSet.Clear();
+            foreach (var item in list)
+            {
+                if (item != null && !string.IsNullOrEmpty(item.AssetPath))
+                {
+                    thisSet.Add(item.AssetPath);
+                }
+            }
+
+            if (stagedView)
+            {
+                stagedSelectionAnchorIndex = list.Count - 1;
+            }
+            else
+            {
+                unstagedSelectionAnchorIndex = list.Count - 1;
+            }
+
+            lastActiveStagedView = stagedView;
+            unstagedScrollView?.RefreshItems();
+            stagedScrollView?.RefreshItems();
+        }
+
+        private void TryStartDrag(bool sourceStaged, GitAssetInfo info, int index)
+        {
+            if (info == null || string.IsNullOrEmpty(info.AssetPath))
+            {
+                return;
+            }
+
+            var sourceSet = sourceStaged ? selectedStagedPaths : selectedUnstagedPaths;
+            if (!sourceSet.Contains(info.AssetPath))
+            {
+                HandleRowSelection(sourceStaged, info, index, shift: false, actionKey: false);
+            }
+
+            var selectedPaths = (sourceStaged ? selectedStagedPaths : selectedUnstagedPaths).ToList();
+            if (selectedPaths.Count == 0)
+            {
+                selectedPaths.Add(info.AssetPath);
+            }
+
+            DragAndDrop.PrepareStartDrag();
+            DragAndDrop.SetGenericData(DragPayloadKey, new DragPayload
+            {
+                SourceStaged = sourceStaged,
+                AssetPaths = selectedPaths
+            });
+            DragAndDrop.objectReferences = Array.Empty<UnityEngine.Object>();
+            DragAndDrop.StartDrag(string.IsNullOrEmpty(info.FileName) ? "GitU" : info.FileName);
         }
 
         private void BindAssetRow(VisualElement element, int index, bool stagedView)
@@ -3102,10 +3412,19 @@ namespace TLNexus.GitU
 
             var info = list[index];
             refs.Info = info;
+            refs.BoundIndex = index;
 
-            refs.SelectToggle?.SetValueWithoutNotify(stagedView
+            var isSelected = stagedView
                 ? selectedStagedPaths.Contains(info.AssetPath)
-                : selectedUnstagedPaths.Contains(info.AssetPath));
+                : selectedUnstagedPaths.Contains(info.AssetPath);
+            element.EnableInClassList("gitU-asset-item--selected", isSelected);
+            element.parent?.EnableInClassList("gitU-list-item--selected", isSelected);
+
+            if (refs.IconImage != null)
+            {
+                var icon = string.IsNullOrEmpty(info.AssetPath) ? null : AssetDatabase.GetCachedIcon(info.AssetPath);
+                refs.IconImage.image = icon != null ? icon : EditorGUIUtility.IconContent("DefaultAsset Icon").image as Texture2D;
+            }
 
             if (refs.NameLabel != null)
             {
@@ -3134,15 +3453,60 @@ namespace TLNexus.GitU
                 refs.NameLabel.style.color = nameColor;
             }
 
-            if (refs.TimeLabel != null)
+            if (refs.ChangeBadgeContainer != null && refs.ChangeBadgeLabel != null)
             {
-                refs.TimeLabel.text = info.WorkingTreeTime.HasValue
-                    ? info.WorkingTreeTime.Value.ToString("yyyy-MM-dd HH:mm")
-                    : "未知时间";
+                var badgeText = info.ChangeType switch
+                {
+                    GitChangeType.Added => "A",
+                    GitChangeType.Deleted => "D",
+                    GitChangeType.Modified => "M",
+                    GitChangeType.Renamed => "M",
+                    _ => string.Empty
+                };
+
+                if (string.IsNullOrEmpty(badgeText))
+                {
+                    refs.ChangeBadgeContainer.style.display = DisplayStyle.None;
+                }
+                else
+                {
+                    refs.ChangeBadgeContainer.style.display = DisplayStyle.Flex;
+                    refs.ChangeBadgeLabel.text = badgeText;
+
+                    Color badgeColor;
+                    switch (info.ChangeType)
+                    {
+                        case GitChangeType.Added:
+                            badgeColor = new Color(0.5f, 0.85f, 0.5f);
+                            break;
+                        case GitChangeType.Deleted:
+                            badgeColor = new Color(0.9f, 0.5f, 0.5f);
+                            break;
+                        case GitChangeType.Modified:
+                        case GitChangeType.Renamed:
+                            badgeColor = new Color(0.95f, 0.75f, 0.4f);
+                            break;
+                        default:
+                            badgeColor = Color.white;
+                            break;
+                    }
+
+                    refs.ChangeBadgeLabel.style.color = badgeColor;
+                    var borderColor = new Color(badgeColor.r, badgeColor.g, badgeColor.b, 0.75f);
+                    refs.ChangeBadgeContainer.style.borderLeftColor = borderColor;
+                    refs.ChangeBadgeContainer.style.borderRightColor = borderColor;
+                    refs.ChangeBadgeContainer.style.borderTopColor = borderColor;
+                    refs.ChangeBadgeContainer.style.borderBottomColor = borderColor;
+                    refs.ChangeBadgeContainer.style.backgroundColor = new Color(badgeColor.r, badgeColor.g, badgeColor.b, 0.10f);
+                }
             }
 
             if (refs.PathLabel != null)
             {
+                var timeText = info.WorkingTreeTime.HasValue
+                    ? info.WorkingTreeTime.Value.ToString("yyyy-MM-dd HH:mm")
+                    : "未知时间";
+
                 var displayPath = GetFolderPath(info.AssetPath);
                 if (!string.IsNullOrEmpty(info.OriginalPath))
                 {
@@ -3164,7 +3528,7 @@ namespace TLNexus.GitU
                     }
                 }
 
-                refs.PathLabel.text = displayPath;
+                refs.PathLabel.text = $"{displayPath} ｜ {timeText}";
             }
         }
 
