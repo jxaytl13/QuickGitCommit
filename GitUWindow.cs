@@ -8,16 +8,20 @@ using UnityEngine;
 using UnityEngine.UIElements;
 using UnityEditor.UIElements;
 
-namespace OneKey.GitTools
+namespace TLNexus.GitU
 {
-    internal class GitQuickCommitWindow : EditorWindow
+    internal class GitUWindow : EditorWindow
     {
-        private const string WindowTitle = "\u5feb\u6377Git\u63d0\u4ea4";
-        private const string CommitHistoryFileName = "QuickGitCommitHistory.json";
-        private const string LayoutAssetName = "GitQuickCommitWindow.uxml";
+        private const string WindowTitle = "GitU";
+        private const string MenuPath = "Window/T·L Nexus/GitU";
+        private const string CommitHistoryFileName = "GitUCommitHistory.json";
+        private const string LegacyCommitHistoryFileName = "QuickGitCommitHistory.json";
+        private const string LayoutAssetName = "GitUWindow.uxml";
         private const int MaxCommitHistoryEntries = 20;
-        private const string StagedAllowListFileName = "QuickGitCommitStagedAllowList.json";
-        private const string AssetTypeFilterPrefsKeyPrefix = "OneKey.GitTools.QuickGitCommit.AssetTypeFilters:";
+        private const string StagedAllowListFileName = "GitUStagedAllowList.json";
+        private const string LegacyStagedAllowListFileName = "QuickGitCommitStagedAllowList.json";
+        private const string AssetTypeFilterPrefsKeyPrefix = "TLNexus.GitU.AssetTypeFilters:";
+        private const string LegacyAssetTypeFilterPrefsKeyPrefix = "OneKey.GitTools.QuickGitCommit.AssetTypeFilters:";
         private const string AddedColorHex = "#80D980";
         private const string ModifiedColorHex = "#F2BF66";
         private const string DeletedColorHex = "#E68080";
@@ -30,7 +34,6 @@ namespace OneKey.GitTools
         private UnityEngine.Object targetAsset;
         private string targetAssetPath;
         private readonly List<GitAssetInfo> assetInfos = new List<GitAssetInfo>();
-        private readonly HashSet<string> excludedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private List<GitChangeEntry> gitChanges = new List<GitChangeEntry>();
         private readonly HashSet<string> relevantPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly List<string> targetAssetPaths = new List<string>();
@@ -46,6 +49,17 @@ namespace OneKey.GitTools
         private double refreshDebounceDeadline;
         private bool listViewRefreshDebouncePending;
         private double listViewRefreshDebounceDeadline;
+
+        [MenuItem(MenuPath, false, 1000)]
+        private static void OpenFromWindowMenu()
+        {
+            var window = GetWindow<GitUWindow>();
+            window.titleContent = new GUIContent(WindowTitle);
+            window.minSize = new Vector2(1040, 600);
+            window.maxSize = new Vector2(1040, 1080);
+            window.Initialize(GetTargetsFromCurrentSelection());
+            window.Show();
+        }
 
         private enum GitOperationKind
         {
@@ -104,12 +118,6 @@ namespace OneKey.GitTools
         };
 
         private readonly HashSet<UnityAssetTypeFilter> assetTypeFilters = new HashSet<UnityAssetTypeFilter>(defaultSelectedAssetTypeFilters);
-        private string startTimeInput = string.Empty;
-        private string endTimeInput = string.Empty;
-        private DateTime? startTimeFilter;
-        private DateTime? endTimeFilter;
-        private bool startTimeValid = true;
-        private bool endTimeValid = true;
         private string searchQuery = string.Empty;
         private string statusMessage;
         private string commitMessage = string.Empty;
@@ -124,12 +132,9 @@ namespace OneKey.GitTools
         private Label pathLabel;
         private Label statusLabel;
         private Label saveToDiskHintLabel;
-        private Toggle toggleAdded;
-        private Toggle toggleModified;
-        private Toggle toggleDeleted;
-        private TextField startTimeField;
-        private TextField endTimeField;
-        private DropdownField timePresetField;
+        private Button addedButton;
+        private Button modifiedButton;
+        private Button deletedButton;
         private ToolbarMenu assetTypeMenu;
         private TextField searchField;
         private Label unstagedHeaderLabel;
@@ -140,11 +145,9 @@ namespace OneKey.GitTools
         private Button commitButton;
         private Button commitAndPushButton;
         private Button historyButton;
-        private Button resetTimeButton;
         private Button refreshButton;
         private Button toStagedButton;
         private Button toUnstagedButton;
-        private Button clearExcludeButton;
         private VisualElement historyDropdown;
         private ListView historyListView;
         private Label repositoryStatusLabel;
@@ -163,6 +166,7 @@ namespace OneKey.GitTools
         private bool visibleListsInitialized;
 
         private static string AssetTypeFilterPrefsKey => $"{AssetTypeFilterPrefsKeyPrefix}{Application.dataPath}";
+        private static string LegacyAssetTypeFilterPrefsKey => $"{LegacyAssetTypeFilterPrefsKeyPrefix}{Application.dataPath}";
 
         private sealed class AssetRowRefs
         {
@@ -171,7 +175,6 @@ namespace OneKey.GitTools
             public Label NameLabel;
             public Label TimeLabel;
             public Label PathLabel;
-            public Button ExcludeButton;
             public Button DiscardButton;
             public GitAssetInfo Info;
         }
@@ -210,7 +213,7 @@ namespace OneKey.GitTools
                 return;
             }
 
-            var window = GetWindow<GitQuickCommitWindow>();
+            var window = GetWindow<GitUWindow>();
             window.titleContent = new GUIContent(WindowTitle);
             window.minSize = new Vector2(1040, 600);
             window.maxSize = new Vector2(1040, 1080);
@@ -280,7 +283,7 @@ namespace OneKey.GitTools
                 }
             }
 
-            var window = GetWindow<GitQuickCommitWindow>();
+            var window = GetWindow<GitUWindow>();
             window.titleContent = new GUIContent(WindowTitle);
             window.minSize = new Vector2(1040, 600);
             window.maxSize = new Vector2(1040, 1080);
@@ -342,7 +345,6 @@ namespace OneKey.GitTools
 
         private void Initialize(IEnumerable<UnityEngine.Object> assets)
         {
-            excludedPaths.Clear();
             SetTargetAssets(assets);
             RefreshData();
         }
@@ -694,124 +696,16 @@ namespace OneKey.GitTools
                 targetField.value = targetAsset;
                 targetField.RegisterValueChangedCallback(evt =>
                 {
-                    excludedPaths.Clear();
                     SetTargetAssets(evt.newValue != null ? new[] { evt.newValue } : null);
                     RefreshData();
                 });
             }
 
-            if (clearExcludeButton != null)
-            {
-                clearExcludeButton.clicked += () =>
-                {
-                    excludedPaths.Clear();
-                    RequestRefreshListViewsDebounced();
-                };
-            }
-
-            if (toggleAdded != null)
-            {
-                toggleAdded.SetValueWithoutNotify(showAdded);
-                toggleAdded.RegisterValueChangedCallback(evt => { showAdded = evt.newValue; RequestRefreshListViewsDebounced(); });
-            }
-
-            if (toggleModified != null)
-            {
-                toggleModified.SetValueWithoutNotify(showModified);
-                toggleModified.RegisterValueChangedCallback(evt => { showModified = evt.newValue; RequestRefreshListViewsDebounced(); });
-            }
-
-            if (toggleDeleted != null)
-            {
-                toggleDeleted.SetValueWithoutNotify(showDeleted);
-                toggleDeleted.RegisterValueChangedCallback(evt => { showDeleted = evt.newValue; RequestRefreshListViewsDebounced(); });
-            }
+            ConfigureChangeTypeButtons();
 
             if (assetTypeMenu != null)
             {
                 ConfigureAssetTypeMenu();
-            }
-            var presetChoices = new List<string>
-            {
-                "\u4e0d\u9650",
-                "1 \u5c0f\u65f6\u5185",
-                "5 \u5c0f\u65f6\u5185",
-                "1 \u5929\u5185",
-                "2 \u5929\u5185",
-                "5 \u5929\u5185"
-            };
-            if (timePresetField != null)
-            {
-                timePresetField.choices = presetChoices;
-                timePresetField.index = 0;
-                timePresetField.RegisterValueChangedCallback(evt =>
-                {
-                    switch (timePresetField.index)
-                    {
-                        case 1:
-                            ApplyQuickRange(TimeSpan.FromHours(1));
-                            break;
-                        case 2:
-                            ApplyQuickRange(TimeSpan.FromHours(5));
-                            break;
-                        case 3:
-                            ApplyQuickRange(TimeSpan.FromDays(1));
-                            break;
-                        case 4:
-                            ApplyQuickRange(TimeSpan.FromDays(2));
-                            break;
-                        case 5:
-                            ApplyQuickRange(TimeSpan.FromDays(5));
-                            break;
-                        default:
-                            startTimeInput = string.Empty;
-                            endTimeInput = string.Empty;
-                            startTimeFilter = null;
-                            endTimeFilter = null;
-                            startTimeValid = true;
-                            endTimeValid = true;
-                            if (startTimeField != null) startTimeField.value = string.Empty;
-                            if (endTimeField != null) endTimeField.value = string.Empty;
-                            RequestRefreshListViewsDebounced();
-                            break;
-                    }
-                });
-            }
-            if (startTimeField != null)
-            {
-                startTimeField.value = startTimeInput;
-                startTimeField.RegisterValueChangedCallback(evt =>
-                {
-                    startTimeInput = evt.newValue;
-                    startTimeFilter = TryParseDateTime(startTimeInput, out startTimeValid);
-                    RequestRefreshListViewsDebounced();
-                });
-            }
-            if (endTimeField != null)
-            {
-                endTimeField.value = endTimeInput;
-                endTimeField.RegisterValueChangedCallback(evt =>
-                {
-                    endTimeInput = evt.newValue;
-                    endTimeFilter = TryParseDateTime(endTimeInput, out endTimeValid);
-                    RequestRefreshListViewsDebounced();
-                });
-            }
-            if (resetTimeButton != null)
-            {
-                resetTimeButton.clicked += () =>
-                {
-                    startTimeInput = string.Empty;
-                    endTimeInput = string.Empty;
-                    startTimeFilter = null;
-                    endTimeFilter = null;
-                    startTimeValid = true;
-                    endTimeValid = true;
-                    if (startTimeField != null) startTimeField.value = string.Empty;
-                    if (endTimeField != null) endTimeField.value = string.Empty;
-                    if (timePresetField != null) timePresetField.index = 0;
-                    RequestRefreshListViewsDebounced();
-                };
             }
             if (searchField != null)
             {
@@ -1178,12 +1072,9 @@ namespace OneKey.GitTools
             pathLabel = root.Q<Label>("pathLabel");
             statusLabel = root.Q<Label>("statusLabel");
             saveToDiskHintLabel = root.Q<Label>("saveToDiskHintLabel");
-            toggleAdded = root.Q<Toggle>("toggleAdded");
-            toggleModified = root.Q<Toggle>("toggleModified");
-            toggleDeleted = root.Q<Toggle>("toggleDeleted");
-            startTimeField = root.Q<TextField>("startTimeField");
-            endTimeField = root.Q<TextField>("endTimeField");
-            timePresetField = root.Q<DropdownField>("timePresetField");
+            addedButton = root.Q<Button>("addedButton");
+            modifiedButton = root.Q<Button>("modifiedButton");
+            deletedButton = root.Q<Button>("deletedButton");
             assetTypeMenu = root.Q<ToolbarMenu>("assetTypeMenu");
             searchField = root.Q<TextField>("searchField");
             unstagedHeaderLabel = root.Q<Label>("unstagedHeaderLabel");
@@ -1194,17 +1085,79 @@ namespace OneKey.GitTools
             commitButton = root.Q<Button>("commitButton");
             commitAndPushButton = root.Q<Button>("commitAndPushButton");
             historyButton = root.Q<Button>("historyButton");
-            resetTimeButton = root.Q<Button>("resetTimeButton");
             refreshButton = root.Q<Button>("refreshButton");
             toStagedButton = root.Q<Button>("toStagedButton");
             toUnstagedButton = root.Q<Button>("toUnstagedButton");
-            clearExcludeButton = root.Q<Button>("clearExcludeButton");
             historyDropdown = root.Q<VisualElement>("historyDropdown");
             historyListView = root.Q<ListView>("historyListView");
             repositoryStatusLabel = root.Q<Label>("repositoryStatusLabel");
             unstagedSelectAllToggle = root.Q<Toggle>("unstagedSelectAllToggle");
             stagedSelectAllToggle = root.Q<Toggle>("stagedSelectAllToggle");
             leftColumn = root.Q<VisualElement>("leftColumn");
+        }
+
+        private void ConfigureChangeTypeButtons()
+        {
+            if (addedButton != null)
+            {
+                addedButton.clicked += () =>
+                {
+                    showAdded = !showAdded;
+                    UpdateChangeTypeButtonsVisuals();
+                    RequestRefreshListViewsDebounced();
+                };
+            }
+
+            if (modifiedButton != null)
+            {
+                modifiedButton.clicked += () =>
+                {
+                    showModified = !showModified;
+                    UpdateChangeTypeButtonsVisuals();
+                    RequestRefreshListViewsDebounced();
+                };
+            }
+
+            if (deletedButton != null)
+            {
+                deletedButton.clicked += () =>
+                {
+                    showDeleted = !showDeleted;
+                    UpdateChangeTypeButtonsVisuals();
+                    RequestRefreshListViewsDebounced();
+                };
+            }
+
+            UpdateChangeTypeButtonsVisuals();
+        }
+
+        private void UpdateChangeTypeButtonsVisuals()
+        {
+            UpdateChangeTypeButtonVisual(addedButton, showAdded);
+            UpdateChangeTypeButtonVisual(modifiedButton, showModified);
+            UpdateChangeTypeButtonVisual(deletedButton, showDeleted);
+        }
+
+        private static void UpdateChangeTypeButtonVisual(Button button, bool enabled)
+        {
+            if (button == null)
+            {
+                return;
+            }
+
+            button.style.opacity = enabled ? 1f : 0.35f;
+            button.style.backgroundColor = enabled
+                ? new Color(0.22f, 0.22f, 0.22f, 0.75f)
+                : new Color(0.12f, 0.12f, 0.12f, 0.35f);
+            button.style.borderTopWidth = 1;
+            button.style.borderRightWidth = 1;
+            button.style.borderBottomWidth = 1;
+            button.style.borderLeftWidth = 1;
+            button.style.borderTopColor = new Color(1f, 1f, 1f, 0.08f);
+            button.style.borderRightColor = new Color(1f, 1f, 1f, 0.08f);
+            button.style.borderBottomColor = new Color(1f, 1f, 1f, 0.08f);
+            button.style.borderLeftColor = new Color(1f, 1f, 1f, 0.08f);
+            button.style.unityTextAlign = TextAnchor.MiddleCenter;
         }
 
         private void StageSelectedUnstaged()
@@ -1514,18 +1467,7 @@ namespace OneKey.GitTools
                 }
             }
 
-            if (excludedPaths.Contains(info.AssetPath) ||
-                (!string.IsNullOrEmpty(info.OriginalPath) && excludedPaths.Contains(info.OriginalPath)))
-            {
-                return false;
-            }
-
             if (!IsChangeTypeVisible(info.ChangeType))
-            {
-                return false;
-            }
-
-            if (!IsWithinTimeRange(info.WorkingTreeTime))
             {
                 return false;
             }
@@ -1638,18 +1580,7 @@ namespace OneKey.GitTools
                     }
                 }
 
-                if (excludedPaths.Contains(info.AssetPath) ||
-                    (!string.IsNullOrEmpty(info.OriginalPath) && excludedPaths.Contains(info.OriginalPath)))
-                {
-                    continue;
-                }
-
                 if (!IsChangeTypeVisible(info.ChangeType))
-                {
-                    continue;
-                }
-
-                if (!IsWithinTimeRange(info.WorkingTreeTime))
                 {
                     continue;
                 }
@@ -1817,6 +1748,13 @@ namespace OneKey.GitTools
             assetTypeFilters.Clear();
 
             var raw = EditorPrefs.GetString(AssetTypeFilterPrefsKey, string.Empty);
+            var loadedFromLegacy = false;
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                raw = EditorPrefs.GetString(LegacyAssetTypeFilterPrefsKey, string.Empty);
+                loadedFromLegacy = !string.IsNullOrWhiteSpace(raw);
+            }
+
             if (string.IsNullOrWhiteSpace(raw))
             {
                 foreach (var type in defaultSelectedAssetTypeFilters)
@@ -1848,6 +1786,11 @@ namespace OneKey.GitTools
                 {
                     assetTypeFilters.Add(type);
                 }
+            }
+
+            if (loadedFromLegacy)
+            {
+                SaveAssetTypeFilters();
             }
         }
 
@@ -1886,31 +1829,6 @@ namespace OneKey.GitTools
                 GitChangeType.Renamed => showModified,
                 _ => true
             };
-        }
-
-        private bool IsWithinTimeRange(DateTime? time)
-        {
-            if (!startTimeFilter.HasValue && !endTimeFilter.HasValue)
-            {
-                return true;
-            }
-
-            if (!time.HasValue)
-            {
-                return true;
-            }
-
-            if (startTimeFilter.HasValue && time.Value < startTimeFilter.Value)
-            {
-                return false;
-            }
-
-            if (endTimeFilter.HasValue && time.Value > endTimeFilter.Value)
-            {
-                return false;
-            }
-
-            return true;
         }
 
         private void RequestRefreshData(bool clearUi)
@@ -2435,6 +2353,15 @@ namespace OneKey.GitTools
             savedCommitHistory = new List<string>();
             fallbackCommitHistory = new List<string>();
 
+            if (!File.Exists(path))
+            {
+                var legacyPath = GetCommitHistoryFilePath(LegacyCommitHistoryFileName);
+                if (File.Exists(legacyPath))
+                {
+                    path = legacyPath;
+                }
+            }
+
             if (File.Exists(path))
             {
                 string json;
@@ -2444,7 +2371,7 @@ namespace OneKey.GitTools
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogWarning($"GitQuickCommit: 读取提交记录失败: {ex.Message}");
+                    Debug.LogWarning($"GitU: 读取提交记录失败: {ex.Message}");
                     json = null;
                 }
 
@@ -2466,7 +2393,7 @@ namespace OneKey.GitTools
                     }
                     catch (Exception ex)
                     {
-                        Debug.LogWarning($"GitQuickCommit: 解析提交记录失败: {ex.Message}");
+                        Debug.LogWarning($"GitU: 解析提交记录失败: {ex.Message}");
                         savedCommitHistory.Clear();
                     }
                 }
@@ -2486,7 +2413,7 @@ namespace OneKey.GitTools
             catch (Exception ex)
             {
                 fallbackCommitHistory = new List<string>();
-                Debug.LogWarning($"GitQuickCommit: 读取Git提交记录失败: {ex.Message}");
+                Debug.LogWarning($"GitU: 读取Git提交记录失败: {ex.Message}");
             }
         }
 
@@ -2509,7 +2436,7 @@ namespace OneKey.GitTools
 
             if (myMessages == null || myMessages.Count == 0)
             {
-                Debug.LogWarning("GitQuickCommit: 未找到当前用户的提交记录（可能未配置 git user.email/user.name），无法过滤本地历史文件。");
+                Debug.LogWarning("GitU: 未找到当前用户的提交记录（可能未配置 git user.email/user.name），无法过滤本地历史文件。");
                 return;
             }
 
@@ -2607,7 +2534,7 @@ namespace OneKey.GitTools
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"GitQuickCommit: 保存提交记录失败: {ex.Message}");
+                Debug.LogWarning($"GitU: 保存提交记录失败: {ex.Message}");
             }
         }
 
@@ -2784,11 +2711,6 @@ namespace OneKey.GitTools
             if (refreshButton != null)
             {
                 refreshButton.SetEnabled(true);
-            }
-
-            if (resetTimeButton != null)
-            {
-                resetTimeButton.SetEnabled(true);
             }
         }
 
@@ -3042,14 +2964,9 @@ namespace OneKey.GitTools
             pathInfoLabel.style.flexGrow = 1f;
             pathRow.Add(pathInfoLabel);
 
-            Button excludeButton = null;
             Button discardButton = null;
             if (!stagedView)
             {
-                excludeButton = new Button { text = "排除" };
-                excludeButton.style.marginLeft = 4;
-                pathRow.Add(excludeButton);
-
                 discardButton = new Button { text = "放弃更改" };
                 discardButton.style.marginLeft = 4;
                 pathRow.Add(discardButton);
@@ -3064,7 +2981,6 @@ namespace OneKey.GitTools
                 NameLabel = nameLabel,
                 TimeLabel = timeLabel,
                 PathLabel = pathInfoLabel,
-                ExcludeButton = excludeButton,
                 DiscardButton = discardButton
             };
             container.userData = refs;
@@ -3126,21 +3042,6 @@ namespace OneKey.GitTools
                     ShowTempNotification($"已复制路径：{info.AssetPath}");
                 }
             });
-
-            if (excludeButton != null)
-            {
-                excludeButton.clicked += () =>
-                {
-                    var info = refs.Info;
-                    if (info == null)
-                    {
-                        return;
-                    }
-
-                    excludedPaths.Add(info.AssetPath);
-                    RequestRefreshListViewsDebounced();
-                };
-            }
 
             if (discardButton != null)
             {
@@ -3666,24 +3567,6 @@ namespace OneKey.GitTools
             }
         }
 
-        private void ApplyQuickRange(TimeSpan duration)
-        {
-            var now = DateTime.Now;
-            var start = now - duration;
-
-            startTimeFilter = start;
-            endTimeFilter = now;
-            startTimeInput = FormatDateTime(start);
-            endTimeInput = FormatDateTime(now);
-            startTimeValid = true;
-            endTimeValid = true;
-
-            if (startTimeField != null) startTimeField.value = startTimeInput;
-            if (endTimeField != null) endTimeField.value = endTimeInput;
-
-            RequestRefreshListViewsDebounced();
-        }
-
         private string GetAssetFolderPath()
         {
             if (!string.IsNullOrEmpty(cachedAssetFolderPath))
@@ -3698,29 +3581,6 @@ namespace OneKey.GitTools
             return cachedAssetFolderPath;
         }
 
-        private static DateTime? TryParseDateTime(string input, out bool valid)
-        {
-            if (string.IsNullOrWhiteSpace(input))
-            {
-                valid = true;
-                return null;
-            }
-
-            if (DateTime.TryParse(input, out var result))
-            {
-                valid = true;
-                return result;
-            }
-
-            valid = false;
-            return null;
-        }
-
-        private static string FormatDateTime(DateTime value)
-        {
-            return value.ToString("yyyy-MM-dd HH:mm");
-        }
-
         private static string GetFolderPath(string assetPath)
         {
             if (string.IsNullOrEmpty(assetPath))
@@ -3732,18 +3592,18 @@ namespace OneKey.GitTools
             return lastSlash > 0 ? assetPath.Substring(0, lastSlash) : assetPath;
         }
 
-        private static string GetCommitHistoryFilePath()
+        private static string GetCommitHistoryFilePath(string fileName = CommitHistoryFileName)
         {
             var projectFolder = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
             var libraryFolder = Path.Combine(projectFolder, "Library");
-            return Path.Combine(libraryFolder, CommitHistoryFileName);
+            return Path.Combine(libraryFolder, fileName);
         }
 
-        private static string GetStagedAllowListFilePath()
+        private static string GetStagedAllowListFilePath(string fileName = StagedAllowListFileName)
         {
             var projectFolder = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
             var libraryFolder = Path.Combine(projectFolder, "Library");
-            return Path.Combine(libraryFolder, StagedAllowListFileName);
+            return Path.Combine(libraryFolder, fileName);
         }
 
         private void LoadStagedAllowList()
@@ -3753,7 +3613,15 @@ namespace OneKey.GitTools
             var path = GetStagedAllowListFilePath();
             if (!File.Exists(path))
             {
-                return;
+                var legacyPath = GetStagedAllowListFilePath(LegacyStagedAllowListFileName);
+                if (File.Exists(legacyPath))
+                {
+                    path = legacyPath;
+                }
+                else
+                {
+                    return;
+                }
             }
 
             try
@@ -3782,7 +3650,7 @@ namespace OneKey.GitTools
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"GitQuickCommit: 读取暂存白名单失败: {ex.Message}");
+                Debug.LogWarning($"GitU: 读取暂存白名单失败: {ex.Message}");
                 stagedAllowList.Clear();
             }
         }
@@ -3816,7 +3684,7 @@ namespace OneKey.GitTools
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"GitQuickCommit: 保存暂存白名单失败: {ex.Message}");
+                Debug.LogWarning($"GitU: 保存暂存白名单失败: {ex.Message}");
             }
         }
 

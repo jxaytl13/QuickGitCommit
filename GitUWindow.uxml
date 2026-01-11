@@ -4,7 +4,9 @@
             <ui:VisualElement name="headerCard" class="card mb-4" style="min-height: 80px; justify-content: flex-start; width: 100%; padding-bottom: 4px;">
                 <ui:VisualElement name="headerRow" class="row" style="flex-direction: row; justify-content: space-between; height: 25px; align-items: stretch;">
                     <uie:ObjectField name="targetField" label="目标资源" class="flex-grow-field" style="flex-grow: 1;" />
-                    <ui:Button name="clearExcludeButton" text="清除排除" style="display: flex; width: 100px; flex-shrink: 0; flex-grow: 0;" />
+                    <ui:VisualElement class="row" style="flex-direction: row; flex-shrink: 0;">
+                        <ui:Button name="refreshButton" text="刷新" class="primary-button" style="display: flex; width: 80px; flex-shrink: 0; flex-grow: 0; margin-right: 6px;" />
+                    </ui:VisualElement>
                 </ui:VisualElement>
                 <ui:Label name="pathLabel" class="secondary-text" />
                 <ui:Label name="operationHintLabel" text="提示：单击文件名定位，双击复制文件名；双击路径复制全路径。" class="hint-text" style="color: rgb(255, 215, 0);" />
@@ -16,36 +18,18 @@
                 <ui:VisualElement name="typeRow" class="row space-between" style="flex-direction: row; justify-content: space-between;">
                     <ui:VisualElement name="typeGroup" class="row type-group" style="flex-direction: row; align-items: center; justify-content: space-between; flex-grow: 0;">
                         <ui:VisualElement name="addedContainer" class="row type-container type-added" style="flex-direction: row; width: auto; margin-right: 16px;">
-                            <ui:Toggle name="toggleAdded" style="align-items: stretch; margin-right: 8px;" />
-                            <ui:Label text="新增" class="type-label type-added-label" style="color: rgb(128, 217, 128);" />
+                            <ui:Button name="addedButton" text="新增" class="type-button" style="color: rgb(128, 217, 128); -unity-font-style: bold; padding-left: 10px; padding-right: 10px; height: 20px;" />
                         </ui:VisualElement>
                         <ui:VisualElement name="modifiedContainer" class="row type-container type-modified" style="flex-direction: row; margin-right: 20px;">
-                            <ui:Toggle name="toggleModified" style="margin-right: 8px;" />
-                            <ui:Label text="修改" class="type-label type-modified-label" style="color: rgb(242, 191, 102);" />
+                            <ui:Button name="modifiedButton" text="修改" class="type-button" style="color: rgb(242, 191, 102); -unity-font-style: bold; padding-left: 10px; padding-right: 10px; height: 20px;" />
                         </ui:VisualElement>
                         <ui:VisualElement name="deletedContainer" class="row type-container" style="flex-direction: row; margin-bottom: 0; margin-right: 20px;">
-                            <ui:Toggle name="toggleDeleted" style="margin-right: 8px;" />
-                            <ui:Label text="删除" class="type-label type-deleted-label" style="color: rgb(230, 128, 128);" />
+                            <ui:Button name="deletedButton" text="删除" class="type-button" style="color: rgb(230, 128, 128); -unity-font-style: bold; padding-left: 10px; padding-right: 10px; height: 20px;" />
                         </ui:VisualElement>
-                    </ui:VisualElement>
-                    <ui:VisualElement name="presetContainer" class="row preset-container" style="flex-direction: row; justify-content: flex-end;">
-                        <ui:Label name="presetLabel" text="时间" style="margin-right: 10px; -unity-text-align: middle-left;" />
-                        <ui:DropdownField name="timePresetField" class="dropdown-preset" style="width: 100px;" />
                     </ui:VisualElement>
                     <ui:VisualElement name="assetTypeContainer" class="row preset-container" style="flex-direction: row; justify-content: flex-end;">
                         <ui:Label name="assetTypeLabel" text="类型" style="margin-right: 10px; -unity-text-align: middle-left;" />
                         <uie:ToolbarMenu name="assetTypeMenu" class="dropdown-preset" style="width: 180px;" />
-                    </ui:VisualElement>
-                </ui:VisualElement>
-                <ui:Label name="timeRangeLabel" text="时间范围 (格式: yyyy-MM-dd HH:mm)" class="time-range-label" style="padding-right: 0;" />
-                <ui:VisualElement name="timeRow" class="row time-row" style="flex-direction: row; justify-content: space-between;">
-                    <ui:VisualElement name="startRow" class="start-row" style="flex-grow: 1;">
-                        <ui:TextField name="startTimeField" label="开始" class="text-field-grow" />
-                        <ui:TextField name="endTimeField" label="结束" class="text-field-grow" />
-                    </ui:VisualElement>
-                    <ui:VisualElement name="timeButtonRow" class="row time-button-row" style="width: 100px;">
-                        <ui:Button name="resetTimeButton" text="重置时间" class="primary-button" />
-                        <ui:Button name="refreshButton" text="刷新" class="primary-button" />
                     </ui:VisualElement>
                 </ui:VisualElement>
                 <ui:TextField name="searchField" label="搜索" tooltip="搜索变更区与待提交区（按文件名/路径）" style="margin-top: 6px;" />

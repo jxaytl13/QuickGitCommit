@@ -10,7 +10,7 @@ using UnityEditor;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
 
-namespace OneKey.GitTools
+namespace TLNexus.GitU
 {
     internal enum GitChangeType
     {
@@ -307,7 +307,7 @@ namespace OneKey.GitTools
                     {
                         if (!gitRootNotFoundLogged)
                         {
-                            Debug.LogWarning("GitQuickCommit: 未找到Git根目录（.git）。请确认当前Unity工程在Git仓库内，且已安装并可在命令行调用 git。");
+                            Debug.LogWarning("GitU: 未找到Git根目录（.git）。请确认当前Unity工程在Git仓库内，且已安装并可在命令行调用 git。");
                             gitRootNotFoundLogged = true;
                         }
                     }
@@ -1359,7 +1359,7 @@ namespace OneKey.GitTools
             {
                 if (stderr.IndexOf("not a git repository", StringComparison.OrdinalIgnoreCase) < 0)
                 {
-                    Debug.LogWarning($"GitQuickCommit: rev-parse 失败: {stderr}");
+                    Debug.LogWarning($"GitU: rev-parse 失败: {stderr}");
                 }
 
                 gitRevParseWarningLogged = true;
@@ -1391,7 +1391,7 @@ namespace OneKey.GitTools
             // 过滤掉包含非法路径字符的条目，避免 ArgumentException
             if (gitRelativePath.IndexOfAny(Path.GetInvalidPathChars()) >= 0)
             {
-                Debug.LogWarning($"GitQuickCommit: 跳过包含非法字符的Git路径: {gitRelativePath}");
+                Debug.LogWarning($"GitU: 跳过包含非法字符的Git路径: {gitRelativePath}");
                 return null;
             }
 
@@ -1409,7 +1409,7 @@ namespace OneKey.GitTools
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"GitQuickCommit: 无法组合Git路径 root={gitRoot}, rel={gitRelativePath}, error={ex.Message}");
+                Debug.LogWarning($"GitU: 无法组合Git路径 root={gitRoot}, rel={gitRelativePath}, error={ex.Message}");
                 return null;
             }
 
