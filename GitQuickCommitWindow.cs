@@ -16,6 +16,8 @@ namespace OneKey.GitTools
         private const string CommitHistoryFileName = "QuickGitCommitHistory.json";
         private const string LayoutAssetName = "GitQuickCommitWindow.uxml";
         private const int MaxCommitHistoryEntries = 20;
+        private const string StagedAllowListFileName = "QuickGitCommitStagedAllowList.json";
+        private const string AssetTypeFilterPrefsKeyPrefix = "OneKey.GitTools.QuickGitCommit.AssetTypeFilters:";
         private const string AddedColorHex = "#80D980";
         private const string ModifiedColorHex = "#F2BF66";
         private const string DeletedColorHex = "#E68080";
@@ -37,7 +39,13 @@ namespace OneKey.GitTools
         private Task<List<GitChangeEntry>> refreshTask;
         private bool refreshInProgress;
         private bool refreshQueued;
+        private bool refreshQueuedClearUi;
         private List<string> refreshInfoMessages;
+        private bool refreshDebouncePending;
+        private bool refreshDebounceClearUi;
+        private double refreshDebounceDeadline;
+        private bool listViewRefreshDebouncePending;
+        private double listViewRefreshDebounceDeadline;
 
         private enum GitOperationKind
         {
@@ -72,9 +80,30 @@ namespace OneKey.GitTools
         private readonly HashSet<string> selectedUnstagedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> selectedStagedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private HashSet<string> initialStagedPaths;
+        private bool hasShownPreexistingStagedHint;
+        private readonly HashSet<string> stagedAllowList = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private bool autoCleanExternalStagedOnOpen;
+        private bool hasAutoCleanedExternalStagedOnOpen;
+        private bool recaptureInitialStagedSnapshotAfterAutoClean;
+        private List<string> pendingStageGitPaths;
+        private List<string> pendingUnstageGitPaths;
         private bool showAdded = true;
         private bool showModified = true;
         private bool showDeleted = true;
+        private static readonly UnityAssetTypeFilter[] defaultSelectedAssetTypeFilters =
+        {
+            UnityAssetTypeFilter.AnimationClip,
+            UnityAssetTypeFilter.Font,
+            UnityAssetTypeFilter.Material,
+            UnityAssetTypeFilter.Mesh,
+            UnityAssetTypeFilter.Prefab,
+            UnityAssetTypeFilter.Scene,
+            UnityAssetTypeFilter.Shader,
+            UnityAssetTypeFilter.Sprite,
+            UnityAssetTypeFilter.Texture
+        };
+
+        private readonly HashSet<UnityAssetTypeFilter> assetTypeFilters = new HashSet<UnityAssetTypeFilter>(defaultSelectedAssetTypeFilters);
         private string startTimeInput = string.Empty;
         private string endTimeInput = string.Empty;
         private DateTime? startTimeFilter;
@@ -94,17 +123,19 @@ namespace OneKey.GitTools
         private ObjectField targetField;
         private Label pathLabel;
         private Label statusLabel;
+        private Label saveToDiskHintLabel;
         private Toggle toggleAdded;
         private Toggle toggleModified;
         private Toggle toggleDeleted;
         private TextField startTimeField;
         private TextField endTimeField;
         private DropdownField timePresetField;
+        private ToolbarMenu assetTypeMenu;
         private TextField searchField;
         private Label unstagedHeaderLabel;
         private Label stagedHeaderLabel;
-        private ScrollView unstagedScrollView;
-        private ScrollView stagedScrollView;
+        private ListView unstagedScrollView;
+        private ListView stagedScrollView;
         private TextField commitMessageField;
         private Button commitButton;
         private Button commitAndPushButton;
@@ -119,6 +150,31 @@ namespace OneKey.GitTools
         private Label repositoryStatusLabel;
         private Toggle unstagedSelectAllToggle;
         private Toggle stagedSelectAllToggle;
+
+        private VisualElement leftColumn;
+        private Label emptyPlaceholderLabel;
+
+        private readonly List<GitAssetInfo> visibleUnstagedItems = new List<GitAssetInfo>();
+        private readonly List<GitAssetInfo> visibleStagedItems = new List<GitAssetInfo>();
+        private readonly Dictionary<string, UnityAssetTypeFilter> assetTypeCache = new Dictionary<string, UnityAssetTypeFilter>(StringComparer.OrdinalIgnoreCase);
+        private int lastUnstagedVisibleCount = -1;
+        private int lastStagedVisibleCount = -1;
+        private bool assetListViewsConfigured;
+        private bool visibleListsInitialized;
+
+        private static string AssetTypeFilterPrefsKey => $"{AssetTypeFilterPrefsKeyPrefix}{Application.dataPath}";
+
+        private sealed class AssetRowRefs
+        {
+            public bool StagedView;
+            public Toggle SelectToggle;
+            public Label NameLabel;
+            public Label TimeLabel;
+            public Label PathLabel;
+            public Button ExcludeButton;
+            public Button DiscardButton;
+            public GitAssetInfo Info;
+        }
 
         // Notification
         private double notificationEndTime;
@@ -519,12 +575,23 @@ namespace OneKey.GitTools
         {
             refreshInProgress = false;
             refreshQueued = false;
+            refreshQueuedClearUi = false;
             refreshInfoMessages = null;
             refreshTask = null;
+            refreshDebouncePending = false;
+            refreshDebounceClearUi = false;
+            refreshDebounceDeadline = 0;
+            listViewRefreshDebouncePending = false;
+            listViewRefreshDebounceDeadline = 0;
 
             gitOperationInProgress = false;
             gitOperationKind = GitOperationKind.None;
             gitOperationTask = null;
+
+            hasAutoCleanedExternalStagedOnOpen = false;
+            recaptureInitialStagedSnapshotAfterAutoClean = false;
+            pendingStageGitPaths = null;
+            pendingUnstageGitPaths = null;
         }
 
         private void Update()
@@ -537,6 +604,8 @@ namespace OneKey.GitTools
 
             PollRefreshTask();
             PollGitOperationTask();
+            PollDebouncedRefresh();
+            PollDebouncedListViewRefresh();
         }
 
         private void OnFocus()
@@ -592,6 +661,15 @@ namespace OneKey.GitTools
         private void CreateGUI()
         {
             historyDropdownVisible = false;
+            autoCleanExternalStagedOnOpen = true;
+            LoadStagedAllowList();
+            LoadAssetTypeFilters();
+            assetListViewsConfigured = false;
+            lastUnstagedVisibleCount = -1;
+            lastStagedVisibleCount = -1;
+            visibleUnstagedItems.Clear();
+            visibleStagedItems.Clear();
+            visibleListsInitialized = false;
 
             var root = rootVisualElement;
             root.Clear();
@@ -599,6 +677,14 @@ namespace OneKey.GitTools
             if (!BuildLayoutFromUxml(root))
             {
                 return;
+            }
+
+            EnsureAssetListViewsConfigured();
+
+            if (saveToDiskHintLabel != null)
+            {
+                saveToDiskHintLabel.text = "重要提示：改材质/动画/Prefab/场景后，请先 Ctrl+S（或 Save Assets）写盘，再打开/刷新；否则可能漏显示。";
+                saveToDiskHintLabel.style.whiteSpace = WhiteSpace.Normal;
             }
 
             if (targetField != null)
@@ -619,26 +705,31 @@ namespace OneKey.GitTools
                 clearExcludeButton.clicked += () =>
                 {
                     excludedPaths.Clear();
-                    RefreshListViews();
+                    RequestRefreshListViewsDebounced();
                 };
             }
 
             if (toggleAdded != null)
             {
                 toggleAdded.SetValueWithoutNotify(showAdded);
-                toggleAdded.RegisterValueChangedCallback(evt => { showAdded = evt.newValue; RefreshListViews(); });
+                toggleAdded.RegisterValueChangedCallback(evt => { showAdded = evt.newValue; RequestRefreshListViewsDebounced(); });
             }
 
             if (toggleModified != null)
             {
                 toggleModified.SetValueWithoutNotify(showModified);
-                toggleModified.RegisterValueChangedCallback(evt => { showModified = evt.newValue; RefreshListViews(); });
+                toggleModified.RegisterValueChangedCallback(evt => { showModified = evt.newValue; RequestRefreshListViewsDebounced(); });
             }
 
             if (toggleDeleted != null)
             {
                 toggleDeleted.SetValueWithoutNotify(showDeleted);
-                toggleDeleted.RegisterValueChangedCallback(evt => { showDeleted = evt.newValue; RefreshListViews(); });
+                toggleDeleted.RegisterValueChangedCallback(evt => { showDeleted = evt.newValue; RequestRefreshListViewsDebounced(); });
+            }
+
+            if (assetTypeMenu != null)
+            {
+                ConfigureAssetTypeMenu();
             }
             var presetChoices = new List<string>
             {
@@ -681,7 +772,7 @@ namespace OneKey.GitTools
                             endTimeValid = true;
                             if (startTimeField != null) startTimeField.value = string.Empty;
                             if (endTimeField != null) endTimeField.value = string.Empty;
-                            RefreshListViews();
+                            RequestRefreshListViewsDebounced();
                             break;
                     }
                 });
@@ -693,7 +784,7 @@ namespace OneKey.GitTools
                 {
                     startTimeInput = evt.newValue;
                     startTimeFilter = TryParseDateTime(startTimeInput, out startTimeValid);
-                    RefreshListViews();
+                    RequestRefreshListViewsDebounced();
                 });
             }
             if (endTimeField != null)
@@ -703,7 +794,7 @@ namespace OneKey.GitTools
                 {
                     endTimeInput = evt.newValue;
                     endTimeFilter = TryParseDateTime(endTimeInput, out endTimeValid);
-                    RefreshListViews();
+                    RequestRefreshListViewsDebounced();
                 });
             }
             if (resetTimeButton != null)
@@ -719,7 +810,7 @@ namespace OneKey.GitTools
                     if (startTimeField != null) startTimeField.value = string.Empty;
                     if (endTimeField != null) endTimeField.value = string.Empty;
                     if (timePresetField != null) timePresetField.index = 0;
-                    RefreshListViews();
+                    RequestRefreshListViewsDebounced();
                 };
             }
             if (searchField != null)
@@ -728,12 +819,12 @@ namespace OneKey.GitTools
                 searchField.RegisterValueChangedCallback(evt =>
                 {
                     searchQuery = evt.newValue ?? string.Empty;
-                    RefreshListViews();
+                    RequestRefreshListViewsDebounced(0.18);
                 });
             }
             if (refreshButton != null)
             {
-                refreshButton.clicked += () => { RefreshData(); };
+                refreshButton.clicked += () => { RequestRefreshData(false); };
             }
             if (unstagedSelectAllToggle != null)
             {
@@ -751,7 +842,7 @@ namespace OneKey.GitTools
                     {
                         selectedUnstagedPaths.Clear();
                     }
-                    RefreshListViews();
+                    unstagedScrollView?.RefreshItems();
                 });
             }
             if (stagedSelectAllToggle != null)
@@ -770,7 +861,7 @@ namespace OneKey.GitTools
                     {
                         selectedStagedPaths.Clear();
                     }
-                    RefreshListViews();
+                    stagedScrollView?.RefreshItems();
                 });
             }
             if (toStagedButton != null)
@@ -848,8 +939,10 @@ namespace OneKey.GitTools
 
             if (refreshQueued)
             {
+                var clearUi = refreshQueuedClearUi;
                 refreshQueued = false;
-                RefreshData();
+                refreshQueuedClearUi = false;
+                RequestRefreshData(clearUi);
                 return;
             }
 
@@ -884,6 +977,8 @@ namespace OneKey.GitTools
 
             var completedTask = gitOperationTask;
             var completedKind = gitOperationKind;
+            var runQueuedRefresh = false;
+            var queuedClearUi = false;
 
             gitOperationTask = null;
             gitOperationKind = GitOperationKind.None;
@@ -894,14 +989,23 @@ namespace OneKey.GitTools
 
             if (refreshQueued)
             {
+                queuedClearUi = refreshQueuedClearUi;
+                runQueuedRefresh = true;
                 refreshQueued = false;
-                RefreshData();
-                return;
+                refreshQueuedClearUi = false;
             }
 
             if (completedTask.IsCanceled)
             {
                 ShowTempNotification("操作已取消。");
+                if (runQueuedRefresh)
+                {
+                    RequestRefreshData(queuedClearUi);
+                }
+                else if (completedKind == GitOperationKind.Stage || completedKind == GitOperationKind.Unstage)
+                {
+                    RequestRefreshDataDebounced(false);
+                }
                 return;
             }
 
@@ -909,10 +1013,48 @@ namespace OneKey.GitTools
             {
                 var error = completedTask.Exception?.GetBaseException().Message ?? "未知错误";
                 ShowTempNotification($"操作失败：{error}");
+                if (runQueuedRefresh)
+                {
+                    RequestRefreshData(queuedClearUi);
+                }
+                else if (completedKind == GitOperationKind.Stage || completedKind == GitOperationKind.Unstage)
+                {
+                    RequestRefreshDataDebounced(false);
+                }
                 return;
             }
 
             var result = completedTask.Result;
+
+            if (completedKind == GitOperationKind.Stage)
+            {
+                if (result.Success && pendingStageGitPaths != null && pendingStageGitPaths.Count > 0)
+                {
+                    foreach (var p in pendingStageGitPaths)
+                    {
+                        stagedAllowList.Add(p);
+                    }
+
+                    SaveStagedAllowList();
+                }
+
+                pendingStageGitPaths = null;
+            }
+            else if (completedKind == GitOperationKind.Unstage)
+            {
+                if (result.Success && pendingUnstageGitPaths != null && pendingUnstageGitPaths.Count > 0)
+                {
+                    foreach (var p in pendingUnstageGitPaths)
+                    {
+                        stagedAllowList.Remove(p);
+                    }
+
+                    SaveStagedAllowList();
+                }
+
+                pendingUnstageGitPaths = null;
+            }
+
             if (completedKind == GitOperationKind.Commit || completedKind == GitOperationKind.CommitAndPush)
             {
                 EditorUtility.DisplayDialog("提交", string.IsNullOrEmpty(result.Summary) ? "操作完成。" : result.Summary, "确定");
@@ -938,6 +1080,12 @@ namespace OneKey.GitTools
                 ShowTempNotification(result.Summary);
             }
 
+            if (recaptureInitialStagedSnapshotAfterAutoClean)
+            {
+                recaptureInitialStagedSnapshotAfterAutoClean = false;
+                initialStagedPaths = null;
+            }
+
             if (completedKind == GitOperationKind.Stage)
             {
                 selectedUnstagedPaths.Clear();
@@ -947,7 +1095,14 @@ namespace OneKey.GitTools
                 selectedStagedPaths.Clear();
             }
 
-            RefreshData();
+            if (runQueuedRefresh)
+            {
+                RequestRefreshData(queuedClearUi);
+            }
+            else
+            {
+                RequestRefreshDataDebounced(false);
+            }
         }
 
         private bool BuildLayoutFromUxml(VisualElement root)
@@ -1022,17 +1177,19 @@ namespace OneKey.GitTools
             targetField = root.Q<ObjectField>("targetField");
             pathLabel = root.Q<Label>("pathLabel");
             statusLabel = root.Q<Label>("statusLabel");
+            saveToDiskHintLabel = root.Q<Label>("saveToDiskHintLabel");
             toggleAdded = root.Q<Toggle>("toggleAdded");
             toggleModified = root.Q<Toggle>("toggleModified");
             toggleDeleted = root.Q<Toggle>("toggleDeleted");
             startTimeField = root.Q<TextField>("startTimeField");
             endTimeField = root.Q<TextField>("endTimeField");
             timePresetField = root.Q<DropdownField>("timePresetField");
+            assetTypeMenu = root.Q<ToolbarMenu>("assetTypeMenu");
             searchField = root.Q<TextField>("searchField");
             unstagedHeaderLabel = root.Q<Label>("unstagedHeaderLabel");
             stagedHeaderLabel = root.Q<Label>("stagedHeaderLabel");
-            unstagedScrollView = root.Q<ScrollView>("unstagedScrollView");
-            stagedScrollView = root.Q<ScrollView>("stagedScrollView");
+            unstagedScrollView = root.Q<ListView>("unstagedScrollView");
+            stagedScrollView = root.Q<ListView>("stagedScrollView");
             commitMessageField = root.Q<TextField>("commitMessageField");
             commitButton = root.Q<Button>("commitButton");
             commitAndPushButton = root.Q<Button>("commitAndPushButton");
@@ -1047,6 +1204,7 @@ namespace OneKey.GitTools
             repositoryStatusLabel = root.Q<Label>("repositoryStatusLabel");
             unstagedSelectAllToggle = root.Q<Toggle>("unstagedSelectAllToggle");
             stagedSelectAllToggle = root.Q<Toggle>("stagedSelectAllToggle");
+            leftColumn = root.Q<VisualElement>("leftColumn");
         }
 
         private void StageSelectedUnstaged()
@@ -1090,6 +1248,16 @@ namespace OneKey.GitTools
                     requests.Add(new GitUtility.GitStageRequest(gitPath, info.ChangeType));
                 }
 
+                // If this is an explicit "Deleted (from move)" entry, stage the destination path as well
+                // so the move is staged as a whole.
+                if (info.ChangeType == GitChangeType.Deleted &&
+                    !string.IsNullOrEmpty(info.OriginalPath) &&
+                    !string.Equals(info.OriginalPath, info.AssetPath, StringComparison.OrdinalIgnoreCase) &&
+                    GitUtility.TryGetGitRelativePath(info.OriginalPath, out var movedToGitPath))
+                {
+                    requests.Add(new GitUtility.GitStageRequest(movedToGitPath, GitChangeType.Added));
+                }
+
                 if (info.ChangeType == GitChangeType.Renamed &&
                     !string.IsNullOrEmpty(info.OriginalPath) &&
                     !string.Equals(info.OriginalPath, info.AssetPath, StringComparison.OrdinalIgnoreCase) &&
@@ -1104,6 +1272,21 @@ namespace OneKey.GitTools
                 ShowTempNotification("当前没有可发送的变更。");
                 return;
             }
+
+            foreach (var info in toStage)
+            {
+                info.IsStaged = true;
+                info.IsUnstaged = false;
+            }
+
+            selectedUnstagedPaths.Clear();
+            ApplyIncrementalMoveBetweenLists(toStage, toStaged: true);
+
+            pendingStageGitPaths = requests.Select(r => r.GitRelativePath)
+                .Where(p => !string.IsNullOrWhiteSpace(p))
+                .Select(p => p.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
 
             gitOperationInProgress = true;
             gitOperationKind = GitOperationKind.Stage;
@@ -1163,6 +1346,16 @@ namespace OneKey.GitTools
                     requests.Add(gitPath);
                 }
 
+                // If this is an explicit "Deleted (from move)" entry, unstage the destination path as well
+                // so the move is unstaged as a whole.
+                if (info.ChangeType == GitChangeType.Deleted &&
+                    !string.IsNullOrEmpty(info.OriginalPath) &&
+                    !string.Equals(info.OriginalPath, info.AssetPath, StringComparison.OrdinalIgnoreCase) &&
+                    GitUtility.TryGetGitRelativePath(info.OriginalPath, out var movedToGitPath))
+                {
+                    requests.Add(movedToGitPath);
+                }
+
                 if (info.ChangeType == GitChangeType.Renamed &&
                     !string.IsNullOrEmpty(info.OriginalPath) &&
                     !string.Equals(info.OriginalPath, info.AssetPath, StringComparison.OrdinalIgnoreCase) &&
@@ -1177,6 +1370,21 @@ namespace OneKey.GitTools
                 ShowTempNotification("当前没有可移出的待提交项。");
                 return;
             }
+
+            foreach (var info in toUnstage)
+            {
+                info.IsStaged = false;
+                info.IsUnstaged = true;
+            }
+
+            selectedStagedPaths.Clear();
+            ApplyIncrementalMoveBetweenLists(toUnstage, toStaged: false);
+
+            pendingUnstageGitPaths = requests
+                .Where(p => !string.IsNullOrWhiteSpace(p))
+                .Select(p => p.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
 
             gitOperationInProgress = true;
             gitOperationKind = GitOperationKind.Unstage;
@@ -1193,6 +1401,212 @@ namespace OneKey.GitTools
                 return new GitOperationResult(success, summary);
             });
             gitOperationTask.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
+        }
+
+        private void ApplyIncrementalMoveBetweenLists(List<GitAssetInfo> moved, bool toStaged)
+        {
+            if (!assetListViewsConfigured || !visibleListsInitialized || unstagedScrollView == null || stagedScrollView == null)
+            {
+                RefreshListViews();
+                return;
+            }
+
+            var touchedUnstaged = false;
+            var touchedStaged = false;
+
+            foreach (var info in moved)
+            {
+                if (info == null || string.IsNullOrEmpty(info.AssetPath))
+                {
+                    continue;
+                }
+
+                if (toStaged)
+                {
+                    touchedUnstaged |= RemoveByPath(visibleUnstagedItems, info.AssetPath);
+
+                    if (IsItemVisibleInList(info, stagedView: true) && !ContainsByPath(visibleStagedItems, info.AssetPath))
+                    {
+                        InsertSortedByPath(visibleStagedItems, info);
+                        touchedStaged = true;
+                    }
+                }
+                else
+                {
+                    touchedStaged |= RemoveByPath(visibleStagedItems, info.AssetPath);
+
+                    if (IsItemVisibleInList(info, stagedView: false) && !ContainsByPath(visibleUnstagedItems, info.AssetPath))
+                    {
+                        InsertSortedByPath(visibleUnstagedItems, info);
+                        touchedUnstaged = true;
+                    }
+                }
+            }
+
+            var isEmpty = visibleUnstagedItems.Count == 0 && visibleStagedItems.Count == 0;
+            UpdateEmptyPlaceholder(isEmpty);
+
+            if (unstagedHeaderLabel != null)
+            {
+                unstagedHeaderLabel.text = $"\u5de5\u4f5c\u533a\u53d8\u66f4\uff08\u672a\u6682\u5b58\uff09\uff1a{visibleUnstagedItems.Count} \u9879";
+            }
+
+            if (stagedHeaderLabel != null)
+            {
+                stagedHeaderLabel.text = $"\u5f85\u63d0\u4ea4\uff08\u5df2\u6682\u5b58\uff09\uff1a{visibleStagedItems.Count} \u9879";
+            }
+
+            if (unstagedSelectAllToggle != null)
+            {
+                var allSelected = visibleUnstagedItems.Count > 0 && visibleUnstagedItems.All(i => selectedUnstagedPaths.Contains(i.AssetPath));
+                unstagedSelectAllToggle.SetValueWithoutNotify(allSelected);
+            }
+
+            if (stagedSelectAllToggle != null)
+            {
+                var allSelected = visibleStagedItems.Count > 0 && visibleStagedItems.All(i => selectedStagedPaths.Contains(i.AssetPath));
+                stagedSelectAllToggle.SetValueWithoutNotify(allSelected);
+            }
+
+            if (touchedUnstaged)
+            {
+                UpdateListView(unstagedScrollView, visibleUnstagedItems, ref lastUnstagedVisibleCount);
+            }
+            else
+            {
+                unstagedScrollView.RefreshItems();
+            }
+
+            if (touchedStaged)
+            {
+                UpdateListView(stagedScrollView, visibleStagedItems, ref lastStagedVisibleCount);
+            }
+            else
+            {
+                stagedScrollView.RefreshItems();
+            }
+        }
+
+        private bool IsItemVisibleInList(GitAssetInfo info, bool stagedView)
+        {
+            if (info == null)
+            {
+                return false;
+            }
+
+            if (stagedView)
+            {
+                if (!info.IsStaged)
+                {
+                    return false;
+                }
+            }
+            else
+            {
+                if (!info.IsUnstaged)
+                {
+                    return false;
+                }
+
+                if (!IsRelevantForCurrentTarget(info))
+                {
+                    return false;
+                }
+            }
+
+            if (excludedPaths.Contains(info.AssetPath) ||
+                (!string.IsNullOrEmpty(info.OriginalPath) && excludedPaths.Contains(info.OriginalPath)))
+            {
+                return false;
+            }
+
+            if (!IsChangeTypeVisible(info.ChangeType))
+            {
+                return false;
+            }
+
+            if (!IsWithinTimeRange(info.WorkingTreeTime))
+            {
+                return false;
+            }
+
+            if (!IsMatchSearchQuery(info))
+            {
+                return false;
+            }
+
+            if (!IsMatchAssetTypeFilter(info))
+            {
+                return false;
+            }
+
+            return true;
+        }
+
+        private static bool RemoveByPath(List<GitAssetInfo> list, string assetPath)
+        {
+            if (list == null || list.Count == 0 || string.IsNullOrEmpty(assetPath))
+            {
+                return false;
+            }
+
+            for (var i = 0; i < list.Count; i++)
+            {
+                var item = list[i];
+                if (item != null && string.Equals(item.AssetPath, assetPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    list.RemoveAt(i);
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool ContainsByPath(List<GitAssetInfo> list, string assetPath)
+        {
+            if (list == null || list.Count == 0 || string.IsNullOrEmpty(assetPath))
+            {
+                return false;
+            }
+
+            foreach (var item in list)
+            {
+                if (item != null && string.Equals(item.AssetPath, assetPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static void InsertSortedByPath(List<GitAssetInfo> list, GitAssetInfo item)
+        {
+            if (list == null || item == null)
+            {
+                return;
+            }
+
+            var key = item.AssetPath ?? string.Empty;
+            var lo = 0;
+            var hi = list.Count;
+            while (lo < hi)
+            {
+                var mid = lo + ((hi - lo) / 2);
+                var midKey = list[mid]?.AssetPath ?? string.Empty;
+                var cmp = string.Compare(midKey, key, StringComparison.OrdinalIgnoreCase);
+                if (cmp < 0)
+                {
+                    lo = mid + 1;
+                }
+                else
+                {
+                    hi = mid;
+                }
+            }
+
+            list.Insert(lo, item);
         }
 
         private IEnumerable<GitAssetInfo> EnumerateFilteredAssets()
@@ -1245,6 +1659,11 @@ namespace OneKey.GitTools
                     continue;
                 }
 
+                if (!IsMatchAssetTypeFilter(info))
+                {
+                    continue;
+                }
+
                 yield return info;
             }
         }
@@ -1269,6 +1688,192 @@ namespace OneKey.GitTools
 
             var name = info.FileName ?? string.Empty;
             return name.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private bool IsMatchAssetTypeFilter(GitAssetInfo info)
+        {
+            if (assetTypeFilters.Contains(UnityAssetTypeFilter.All))
+            {
+                return true;
+            }
+
+            if (info == null)
+            {
+                return false;
+            }
+
+            var path = info.AssetPath;
+            if (string.IsNullOrEmpty(path))
+            {
+                path = info.OriginalPath;
+            }
+
+            if (string.IsNullOrEmpty(path))
+            {
+                return false;
+            }
+
+            if (!assetTypeCache.TryGetValue(path, out var cached))
+            {
+                cached = GitUtility.DetectAssetTypeFilter(path);
+                assetTypeCache[path] = cached;
+            }
+
+            return assetTypeFilters.Contains(cached);
+        }
+
+        private static readonly UnityAssetTypeFilter[] assetTypeOptions =
+        {
+            UnityAssetTypeFilter.All,
+            UnityAssetTypeFilter.AnimationClip,
+            UnityAssetTypeFilter.AudioClip,
+            UnityAssetTypeFilter.AudioMixer,
+            UnityAssetTypeFilter.ComputeShader,
+            UnityAssetTypeFilter.Font,
+            UnityAssetTypeFilter.GUISkin,
+            UnityAssetTypeFilter.Material,
+            UnityAssetTypeFilter.Mesh,
+            UnityAssetTypeFilter.Model,
+            UnityAssetTypeFilter.PhysicMaterial,
+            UnityAssetTypeFilter.Prefab,
+            UnityAssetTypeFilter.Scene,
+            UnityAssetTypeFilter.Script,
+            UnityAssetTypeFilter.Shader,
+            UnityAssetTypeFilter.Sprite,
+            UnityAssetTypeFilter.Texture,
+            UnityAssetTypeFilter.VideoClip,
+            UnityAssetTypeFilter.VisualEffectAsset
+        };
+
+        private void ConfigureAssetTypeMenu()
+        {
+            if (assetTypeMenu == null)
+            {
+                return;
+            }
+
+            assetTypeMenu.text = GetAssetTypeMenuText();
+
+            assetTypeMenu.menu.AppendAction(
+                UnityAssetTypeFilter.All.ToDisplayName(),
+                _ => SetAssetTypeFilter(UnityAssetTypeFilter.All),
+                _ => assetTypeFilters.Contains(UnityAssetTypeFilter.All) ? DropdownMenuAction.Status.Checked : DropdownMenuAction.Status.Normal);
+
+            assetTypeMenu.menu.AppendSeparator();
+
+            foreach (var option in assetTypeOptions)
+            {
+                if (option == UnityAssetTypeFilter.All)
+                {
+                    continue;
+                }
+
+                var captured = option;
+                assetTypeMenu.menu.AppendAction(
+                    captured.ToDisplayName(),
+                    _ => ToggleAssetTypeFilter(captured),
+                    _ => assetTypeFilters.Contains(captured) ? DropdownMenuAction.Status.Checked : DropdownMenuAction.Status.Normal);
+            }
+        }
+
+        private void SetAssetTypeFilter(UnityAssetTypeFilter type)
+        {
+            assetTypeFilters.Clear();
+            assetTypeFilters.Add(type);
+            assetTypeCache.Clear();
+            SaveAssetTypeFilters();
+            if (assetTypeMenu != null) assetTypeMenu.text = GetAssetTypeMenuText();
+            RequestRefreshListViewsDebounced();
+        }
+
+        private void ToggleAssetTypeFilter(UnityAssetTypeFilter type)
+        {
+            if (type == UnityAssetTypeFilter.All)
+            {
+                SetAssetTypeFilter(UnityAssetTypeFilter.All);
+                return;
+            }
+
+            assetTypeFilters.Remove(UnityAssetTypeFilter.All);
+
+            if (!assetTypeFilters.Add(type))
+            {
+                assetTypeFilters.Remove(type);
+            }
+
+            if (assetTypeFilters.Count == 0)
+            {
+                assetTypeFilters.Add(UnityAssetTypeFilter.All);
+            }
+
+            assetTypeCache.Clear();
+            SaveAssetTypeFilters();
+            if (assetTypeMenu != null) assetTypeMenu.text = GetAssetTypeMenuText();
+            RequestRefreshListViewsDebounced();
+        }
+
+        private void LoadAssetTypeFilters()
+        {
+            assetTypeFilters.Clear();
+
+            var raw = EditorPrefs.GetString(AssetTypeFilterPrefsKey, string.Empty);
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                foreach (var type in defaultSelectedAssetTypeFilters)
+                {
+                    assetTypeFilters.Add(type);
+                }
+
+                return;
+            }
+
+            var parts = raw.Split(new[] { '|' }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (var part in parts)
+            {
+                if (Enum.TryParse<UnityAssetTypeFilter>(part, out var value))
+                {
+                    assetTypeFilters.Add(value);
+                }
+            }
+
+            if (assetTypeFilters.Contains(UnityAssetTypeFilter.All))
+            {
+                assetTypeFilters.Clear();
+                assetTypeFilters.Add(UnityAssetTypeFilter.All);
+            }
+
+            if (assetTypeFilters.Count == 0)
+            {
+                foreach (var type in defaultSelectedAssetTypeFilters)
+                {
+                    assetTypeFilters.Add(type);
+                }
+            }
+        }
+
+        private void SaveAssetTypeFilters()
+        {
+            var normalized = assetTypeFilters.Contains(UnityAssetTypeFilter.All) || assetTypeFilters.Count == 0
+                ? new[] { UnityAssetTypeFilter.All }
+                : assetTypeFilters.Where(t => t != UnityAssetTypeFilter.All).ToArray();
+
+            var serialized = string.Join("|", normalized.Select(t => t.ToString()));
+            EditorPrefs.SetString(AssetTypeFilterPrefsKey, serialized);
+        }
+
+        private string GetAssetTypeMenuText()
+        {
+            if (assetTypeFilters.Contains(UnityAssetTypeFilter.All) || assetTypeFilters.Count == 0)
+            {
+                return UnityAssetTypeFilter.All.ToDisplayName();
+            }
+
+            if (assetTypeFilters.Count == 1)
+            {
+                return assetTypeFilters.First().ToDisplayName();
+            }
+
+            return $"已选 {assetTypeFilters.Count} 项";
         }
 
         private bool IsChangeTypeVisible(GitChangeType type)
@@ -1308,21 +1913,87 @@ namespace OneKey.GitTools
             return true;
         }
 
-        private void RefreshData()
+        private void RequestRefreshData(bool clearUi)
         {
             if (refreshInProgress || gitOperationInProgress)
             {
                 refreshQueued = true;
+                refreshQueuedClearUi = refreshQueuedClearUi || clearUi;
                 return;
             }
 
-            assetInfos.Clear();
-            statusMessage = string.Empty;
-            selectedUnstagedPaths.Clear();
-            selectedStagedPaths.Clear();
-            HideHistoryDropdown();
-            relevantPaths.Clear();
-            targetFolderPrefixes.Clear();
+            StartRefresh(clearUi);
+        }
+
+        private void RequestRefreshDataDebounced(bool clearUi, double delaySeconds = 0.15)
+        {
+            refreshDebouncePending = true;
+            refreshDebounceClearUi = refreshDebounceClearUi || clearUi;
+            refreshDebounceDeadline = EditorApplication.timeSinceStartup + Math.Max(0.01, delaySeconds);
+        }
+
+        private void PollDebouncedRefresh()
+        {
+            if (!refreshDebouncePending)
+            {
+                return;
+            }
+
+            if (EditorApplication.timeSinceStartup < refreshDebounceDeadline)
+            {
+                return;
+            }
+
+            var clearUi = refreshDebounceClearUi;
+            refreshDebouncePending = false;
+            refreshDebounceClearUi = false;
+            RequestRefreshData(clearUi);
+        }
+
+        private void RequestRefreshListViewsDebounced(double delaySeconds = 0.12)
+        {
+            listViewRefreshDebouncePending = true;
+            listViewRefreshDebounceDeadline = EditorApplication.timeSinceStartup + Math.Max(0.01, delaySeconds);
+        }
+
+        private void PollDebouncedListViewRefresh()
+        {
+            if (!listViewRefreshDebouncePending)
+            {
+                return;
+            }
+
+            if (EditorApplication.timeSinceStartup < listViewRefreshDebounceDeadline)
+            {
+                return;
+            }
+
+            listViewRefreshDebouncePending = false;
+            RefreshListViews();
+        }
+
+        private void RefreshData()
+        {
+            RequestRefreshData(true);
+        }
+
+        private void StartRefresh(bool clearUi)
+        {
+            if (clearUi)
+            {
+                assetInfos.Clear();
+                assetTypeCache.Clear();
+                statusMessage = string.Empty;
+                selectedUnstagedPaths.Clear();
+                selectedStagedPaths.Clear();
+                HideHistoryDropdown();
+                relevantPaths.Clear();
+                targetFolderPrefixes.Clear();
+            }
+            else
+            {
+                HideHistoryDropdown();
+            }
 
             var infoMessages = new List<string>();
 
@@ -1330,6 +2001,8 @@ namespace OneKey.GitTools
             {
                 targetAssetPath = string.Empty;
                 GitUtility.SetContextAssetPath(null);
+                assetInfos.Clear();
+                assetTypeCache.Clear();
                 statusMessage = "请先在 Project 或 Hierarchy 选择目标资源，再打开窗口（或在顶部“目标资源”里选择）。";
                 UpdateHeaderLabels();
                 RefreshListViews();
@@ -1359,6 +2032,10 @@ namespace OneKey.GitTools
                 UpdateCommitButtonsEnabled();
 
                 infoMessages.Add("未找到 Git 根目录。");
+                assetInfos.Clear();
+                assetTypeCache.Clear();
+                selectedUnstagedPaths.Clear();
+                selectedStagedPaths.Clear();
                 statusMessage = infoMessages.Count > 0 ? string.Join("\n", infoMessages) : string.Empty;
                 UpdateHeaderLabels();
                 RefreshListViews();
@@ -1391,16 +2068,20 @@ namespace OneKey.GitTools
                 UpdateTargetSelectionInfo(gitChanges);
             }
 
-            assetInfos.Clear();
-            foreach (var change in gitChanges)
+            UpdateAssetInfosIncrementally(gitChanges);
+            CaptureInitialStagedSnapshotIfNeeded();
+
+            if (!hasShownPreexistingStagedHint && initialStagedPaths != null && initialStagedPaths.Count > 0)
             {
-                var historyPath = string.IsNullOrEmpty(change.OriginalPath) ? change.Path : change.OriginalPath;
-                var lastTime = GitUtility.GetLastKnownChangeTime(historyPath);
-                assetInfos.Add(new GitAssetInfo(change.Path, change.OriginalPath, change.ChangeType, lastTime, change.WorkingTreeTime, change.IsStaged, change.IsUnstaged));
+                hasShownPreexistingStagedHint = true;
+                infoMessages.Add("提示：右侧“待提交/已暂存”读取的是 Git 暂存区（index）。窗口会自动清理“非本工具暂存”的条目；如需手动清空可执行：git restore --staged .");
             }
 
-            assetInfos.Sort((a, b) => string.Compare(a.AssetPath, b.AssetPath, StringComparison.OrdinalIgnoreCase));
-            CaptureInitialStagedSnapshotIfNeeded();
+            PruneStagedAllowListToCurrentIndex();
+            if (TryStartAutoCleanExternalStagedOnOpen(infoMessages))
+            {
+                return;
+            }
 
             if (targetField != null)
             {
@@ -1425,6 +2106,60 @@ namespace OneKey.GitTools
             ForceRepaintUI();
         }
 
+        private void UpdateAssetInfosIncrementally(List<GitChangeEntry> changes)
+        {
+            var existingByPath = new Dictionary<string, GitAssetInfo>(StringComparer.OrdinalIgnoreCase);
+            foreach (var info in assetInfos)
+            {
+                if (info == null || string.IsNullOrEmpty(info.AssetPath))
+                {
+                    continue;
+                }
+
+                existingByPath[info.AssetPath] = info;
+            }
+
+            var updated = new List<GitAssetInfo>(changes?.Count ?? 0);
+            if (changes != null)
+            {
+                foreach (var change in changes)
+                {
+                    if (string.IsNullOrEmpty(change.Path))
+                    {
+                        continue;
+                    }
+
+                    existingByPath.TryGetValue(change.Path, out var info);
+
+                    var historyPath = string.IsNullOrEmpty(change.OriginalPath) ? change.Path : change.OriginalPath;
+                    var lastTime = GitUtility.GetLastKnownChangeTime(historyPath);
+
+                    if (info == null)
+                    {
+                        info = new GitAssetInfo(change.Path, change.OriginalPath, change.ChangeType, lastTime, change.WorkingTreeTime, change.IsStaged, change.IsUnstaged);
+                    }
+                    else
+                    {
+                        info.AssetPath = change.Path;
+                        info.OriginalPath = change.OriginalPath;
+                        info.ChangeType = change.ChangeType;
+                        info.LastCommitTime = lastTime;
+                        info.WorkingTreeTime = change.WorkingTreeTime;
+                        info.IsStaged = change.IsStaged;
+                        info.IsUnstaged = change.IsUnstaged;
+                    }
+
+                    updated.Add(info);
+                }
+            }
+
+            updated.Sort((a, b) => string.Compare(a.AssetPath, b.AssetPath, StringComparison.OrdinalIgnoreCase));
+
+            assetInfos.Clear();
+            assetInfos.AddRange(updated);
+            assetTypeCache.Clear();
+        }
+
         private void CaptureInitialStagedSnapshotIfNeeded()
         {
             if (initialStagedPaths != null)
@@ -1433,6 +2168,119 @@ namespace OneKey.GitTools
             }
 
             initialStagedPaths = new HashSet<string>(assetInfos.Where(a => a.IsStaged).Select(a => a.AssetPath), StringComparer.OrdinalIgnoreCase);
+        }
+
+        private void PruneStagedAllowListToCurrentIndex()
+        {
+            if (stagedAllowList.Count == 0)
+            {
+                return;
+            }
+
+            var stagedNow = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var info in assetInfos)
+            {
+                if (!info.IsStaged)
+                {
+                    continue;
+                }
+
+                if (GitUtility.TryGetGitRelativePath(info.AssetPath, out var gitPath))
+                {
+                    stagedNow.Add(gitPath);
+                }
+
+                if (info.ChangeType == GitChangeType.Renamed &&
+                    !string.IsNullOrEmpty(info.OriginalPath) &&
+                    !string.Equals(info.OriginalPath, info.AssetPath, StringComparison.OrdinalIgnoreCase) &&
+                    GitUtility.TryGetGitRelativePath(info.OriginalPath, out var originalGitPath))
+                {
+                    stagedNow.Add(originalGitPath);
+                }
+            }
+
+            var removed = stagedAllowList.RemoveWhere(p => !stagedNow.Contains(p));
+            if (removed > 0)
+            {
+                SaveStagedAllowList();
+            }
+        }
+
+        private bool TryStartAutoCleanExternalStagedOnOpen(List<string> infoMessages)
+        {
+            if (!autoCleanExternalStagedOnOpen || hasAutoCleanedExternalStagedOnOpen)
+            {
+                return false;
+            }
+
+            hasAutoCleanedExternalStagedOnOpen = true;
+
+            if (refreshInProgress || gitOperationInProgress)
+            {
+                return false;
+            }
+
+            var gitRoot = GitUtility.ProjectRoot;
+            _ = GitUtility.UnityProjectFolder;
+            if (string.IsNullOrEmpty(gitRoot))
+            {
+                return false;
+            }
+
+            var toUnstage = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var info in assetInfos)
+            {
+                if (!info.IsStaged)
+                {
+                    continue;
+                }
+
+                if (GitUtility.TryGetGitRelativePath(info.AssetPath, out var gitPath) && !stagedAllowList.Contains(gitPath))
+                {
+                    toUnstage.Add(gitPath);
+                }
+
+                if (info.ChangeType == GitChangeType.Renamed &&
+                    !string.IsNullOrEmpty(info.OriginalPath) &&
+                    !string.Equals(info.OriginalPath, info.AssetPath, StringComparison.OrdinalIgnoreCase) &&
+                    GitUtility.TryGetGitRelativePath(info.OriginalPath, out var originalGitPath) &&
+                    !stagedAllowList.Contains(originalGitPath))
+                {
+                    toUnstage.Add(originalGitPath);
+                }
+            }
+
+            if (toUnstage.Count == 0)
+            {
+                return false;
+            }
+
+            var pathsToUnstage = toUnstage.ToList();
+            pendingUnstageGitPaths = pathsToUnstage;
+            recaptureInitialStagedSnapshotAfterAutoClean = true;
+
+            gitOperationInProgress = true;
+            gitOperationKind = GitOperationKind.Unstage;
+            UpdateActionButtonsEnabled();
+            UpdateCommitButtonsEnabled();
+
+            statusMessage = "正在清理外部暂存...";
+            UpdateHeaderLabels();
+            RefreshListViews();
+            ForceRepaintUI();
+
+            gitOperationTask = Task.Run(() =>
+            {
+                var success = GitUtility.UnstageGitPaths(gitRoot, pathsToUnstage, out var summary);
+                if (success)
+                {
+                    summary = $"已自动清理外部暂存：{summary}";
+                }
+
+                return new GitOperationResult(success, summary);
+            });
+            gitOperationTask.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
+            return true;
         }
 
         private void SendVisibleChangesToStage()
@@ -1919,26 +2767,28 @@ namespace OneKey.GitTools
 
         private void UpdateActionButtonsEnabled()
         {
-            var enabled = !refreshInProgress && !gitOperationInProgress;
-
-            if (refreshButton != null)
-            {
-                refreshButton.SetEnabled(enabled);
-            }
+            var busy = refreshInProgress || gitOperationInProgress;
 
             if (toStagedButton != null)
             {
-                toStagedButton.SetEnabled(enabled);
+                toStagedButton.SetEnabled(!busy);
             }
 
             if (toUnstagedButton != null)
             {
-                toUnstagedButton.SetEnabled(enabled);
+                toUnstagedButton.SetEnabled(!busy);
+            }
+
+            // 这两个按钮不应随 Git 操作频繁禁用/启用，否则视觉上会“闪一下”
+            //（看起来像被程序点击/操控）；它们的动作要么只是本地筛选，要么会自动排队刷新。
+            if (refreshButton != null)
+            {
+                refreshButton.SetEnabled(true);
             }
 
             if (resetTimeButton != null)
             {
-                resetTimeButton.SetEnabled(enabled);
+                resetTimeButton.SetEnabled(true);
             }
         }
 
@@ -1949,9 +2799,17 @@ namespace OneKey.GitTools
                 return;
             }
 
-            var validUnstaged = new HashSet<string>(
-                assetInfos.Where(i => i.IsUnstaged).Select(i => i.AssetPath),
-                StringComparer.OrdinalIgnoreCase);
+            EnsureAssetListViewsConfigured();
+
+            var unstagedScroll = unstagedScrollView.Q<ScrollView>();
+            var stagedScroll = stagedScrollView.Q<ScrollView>();
+            var unstagedScrollOffset = unstagedScroll?.scrollOffset ?? Vector2.zero;
+            var stagedScrollOffset = stagedScroll?.scrollOffset ?? Vector2.zero;
+
+            var unstaged = EnumerateFilteredAssets(false).ToList();
+            var staged = EnumerateFilteredAssets(true).ToList();
+
+            var validUnstaged = new HashSet<string>(unstaged.Select(i => i.AssetPath), StringComparer.OrdinalIgnoreCase);
             foreach (var path in selectedUnstagedPaths.ToList())
             {
                 if (!validUnstaged.Contains(path))
@@ -1960,9 +2818,7 @@ namespace OneKey.GitTools
                 }
             }
 
-            var validStaged = new HashSet<string>(
-                assetInfos.Where(i => i.IsStaged).Select(i => i.AssetPath),
-                StringComparer.OrdinalIgnoreCase);
+            var validStaged = new HashSet<string>(staged.Select(i => i.AssetPath), StringComparer.OrdinalIgnoreCase);
             foreach (var path in selectedStagedPaths.ToList())
             {
                 if (!validStaged.Contains(path))
@@ -1970,9 +2826,6 @@ namespace OneKey.GitTools
                     selectedStagedPaths.Remove(path);
                 }
             }
-
-            var unstaged = EnumerateFilteredAssets(false).ToList();
-            var staged = EnumerateFilteredAssets(true).ToList();
 
             if (unstagedHeaderLabel != null)
             {
@@ -1996,29 +2849,30 @@ namespace OneKey.GitTools
                 stagedSelectAllToggle.SetValueWithoutNotify(allSelected);
             }
 
-            unstagedScrollView.Clear();
-            stagedScrollView.Clear();
+            var isEmpty = unstaged.Count == 0 && staged.Count == 0;
+            UpdateEmptyPlaceholder(isEmpty);
 
-            foreach (var info in unstaged)
+            visibleUnstagedItems.Clear();
+            visibleUnstagedItems.AddRange(unstaged);
+            visibleStagedItems.Clear();
+            visibleStagedItems.AddRange(staged);
+
+            UpdateListView(unstagedScrollView, visibleUnstagedItems, ref lastUnstagedVisibleCount);
+            UpdateListView(stagedScrollView, visibleStagedItems, ref lastStagedVisibleCount);
+            visibleListsInitialized = true;
+
+            if (unstagedScroll != null)
             {
-                unstagedScrollView.Add(CreateAssetRow(info, false));
+                unstagedScroll.schedule.Execute(() => { unstagedScroll.scrollOffset = unstagedScrollOffset; });
             }
 
-            foreach (var info in staged)
+            if (stagedScroll != null)
             {
-                stagedScrollView.Add(CreateAssetRow(info, true));
-            }
-
-            if (unstaged.Count == 0 && staged.Count == 0)
-            {
-                var message = string.IsNullOrEmpty(statusMessage)
-                    ? "Git 未检测到可显示的变更。"
-                    : statusMessage;
-                AddEmptyPlaceholderLabel(unstagedScrollView, message);
+                stagedScroll.schedule.Execute(() => { stagedScroll.scrollOffset = stagedScrollOffset; });
             }
         }
 
-        private void AddEmptyPlaceholderLabel(ScrollView target, string message)
+        private void AddEmptyPlaceholderLabel(VisualElement target, string message)
         {
             if (target == null)
             {
@@ -2041,11 +2895,111 @@ namespace OneKey.GitTools
             target.Add(container);
         }
 
-        private VisualElement CreateAssetRow(GitAssetInfo info, bool stagedView)
+        private void EnsureAssetListViewsConfigured()
+        {
+            if (assetListViewsConfigured)
+            {
+                return;
+            }
+
+            if (unstagedScrollView == null || stagedScrollView == null)
+            {
+                return;
+            }
+
+            EnsureEmptyPlaceholderCreated();
+
+            ConfigureAssetListView(unstagedScrollView, stagedView: false);
+            ConfigureAssetListView(stagedScrollView, stagedView: true);
+
+            unstagedScrollView.itemsSource = visibleUnstagedItems;
+            stagedScrollView.itemsSource = visibleStagedItems;
+
+            assetListViewsConfigured = true;
+        }
+
+        private void EnsureEmptyPlaceholderCreated()
+        {
+            if (emptyPlaceholderLabel != null || leftColumn == null)
+            {
+                return;
+            }
+
+            emptyPlaceholderLabel = new Label();
+            emptyPlaceholderLabel.style.flexGrow = 1f;
+            emptyPlaceholderLabel.style.unityTextAlign = TextAnchor.MiddleCenter;
+            emptyPlaceholderLabel.style.color = new Color(1f, 1f, 1f, 0.6f);
+            emptyPlaceholderLabel.style.display = DisplayStyle.None;
+
+            var insertIndex = 1;
+            if (insertIndex < 0) insertIndex = 0;
+            if (insertIndex > leftColumn.childCount) insertIndex = leftColumn.childCount;
+            leftColumn.Insert(insertIndex, emptyPlaceholderLabel);
+        }
+
+        private void UpdateEmptyPlaceholder(bool isEmpty)
+        {
+            if (emptyPlaceholderLabel == null)
+            {
+                return;
+            }
+
+            if (!isEmpty)
+            {
+                emptyPlaceholderLabel.style.display = DisplayStyle.None;
+                if (unstagedScrollView != null) unstagedScrollView.style.display = DisplayStyle.Flex;
+                if (stagedScrollView != null) stagedScrollView.style.display = DisplayStyle.Flex;
+                return;
+            }
+
+            var message = string.IsNullOrEmpty(statusMessage)
+                ? "Git 未检测到可显示的变更。"
+                : statusMessage;
+
+            emptyPlaceholderLabel.text = message;
+            emptyPlaceholderLabel.style.display = DisplayStyle.Flex;
+            if (unstagedScrollView != null) unstagedScrollView.style.display = DisplayStyle.None;
+            if (stagedScrollView != null) stagedScrollView.style.display = DisplayStyle.None;
+        }
+
+        private void ConfigureAssetListView(ListView listView, bool stagedView)
+        {
+            listView.selectionType = SelectionType.None;
+#if UNITY_2021_2_OR_NEWER
+            listView.virtualizationMethod = CollectionVirtualizationMethod.FixedHeight;
+            listView.fixedItemHeight = 54;
+            listView.reorderable = false;
+#else
+            listView.itemHeight = 54;
+#endif
+
+            listView.makeItem = () => CreateAssetRowTemplate(stagedView);
+            listView.bindItem = (e, i) => BindAssetRow(e, i, stagedView);
+        }
+
+        private void UpdateListView(ListView listView, List<GitAssetInfo> items, ref int lastCount)
+        {
+            if (listView == null)
+            {
+                return;
+            }
+
+            listView.itemsSource = items;
+
+            if (lastCount != items.Count)
+            {
+                lastCount = items.Count;
+                listView.Rebuild();
+                return;
+            }
+
+            listView.RefreshItems();
+        }
+
+        private VisualElement CreateAssetRowTemplate(bool stagedView)
         {
             var container = new VisualElement();
             container.style.flexDirection = FlexDirection.Column;
-            container.style.marginBottom = 2;
             container.style.paddingLeft = 4;
             container.style.paddingRight = 4;
             container.style.paddingTop = 4;
@@ -2060,11 +3014,69 @@ namespace OneKey.GitTools
             var selectToggle = new Toggle();
             selectToggle.style.width = 16;
             selectToggle.style.marginRight = 4;
-            selectToggle.SetValueWithoutNotify(stagedView
-                ? selectedStagedPaths.Contains(info.AssetPath)
-                : selectedUnstagedPaths.Contains(info.AssetPath));
+            headerRow.Add(selectToggle);
+
+            var nameLabel = new Label();
+            nameLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
+            headerRow.Add(nameLabel);
+
+            var spacer = new VisualElement();
+            spacer.style.flexGrow = 1f;
+            headerRow.Add(spacer);
+
+            var timeLabel = new Label();
+            timeLabel.style.marginLeft = 8;
+            timeLabel.style.fontSize = 10;
+            timeLabel.style.color = new Color(1f, 1f, 1f, 0.6f);
+            headerRow.Add(timeLabel);
+
+            container.Add(headerRow);
+
+            var pathRow = new VisualElement();
+            pathRow.style.flexDirection = FlexDirection.Row;
+            pathRow.style.alignItems = Align.Center;
+
+            var pathInfoLabel = new Label();
+            pathInfoLabel.style.fontSize = 10;
+            pathInfoLabel.style.color = new Color(1f, 1f, 1f, 0.6f);
+            pathInfoLabel.style.flexGrow = 1f;
+            pathRow.Add(pathInfoLabel);
+
+            Button excludeButton = null;
+            Button discardButton = null;
+            if (!stagedView)
+            {
+                excludeButton = new Button { text = "排除" };
+                excludeButton.style.marginLeft = 4;
+                pathRow.Add(excludeButton);
+
+                discardButton = new Button { text = "放弃更改" };
+                discardButton.style.marginLeft = 4;
+                pathRow.Add(discardButton);
+            }
+
+            container.Add(pathRow);
+
+            var refs = new AssetRowRefs
+            {
+                StagedView = stagedView,
+                SelectToggle = selectToggle,
+                NameLabel = nameLabel,
+                TimeLabel = timeLabel,
+                PathLabel = pathInfoLabel,
+                ExcludeButton = excludeButton,
+                DiscardButton = discardButton
+            };
+            container.userData = refs;
+
             selectToggle.RegisterValueChangedCallback(evt =>
             {
+                var info = refs.Info;
+                if (info == null || string.IsNullOrEmpty(info.AssetPath))
+                {
+                    return;
+                }
+
                 var targetSet = stagedView ? selectedStagedPaths : selectedUnstagedPaths;
                 if (evt.newValue)
                 {
@@ -2075,34 +3087,15 @@ namespace OneKey.GitTools
                     targetSet.Remove(info.AssetPath);
                 }
             });
-            headerRow.Add(selectToggle);
-
-            var nameLabel = new Label(info.FileName);
-            nameLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
-            Color nameColor;
-            switch (info.ChangeType)
-            {
-                case GitChangeType.Added:
-                    nameColor = new Color(0.5f, 0.85f, 0.5f);
-                    break;
-                case GitChangeType.Deleted:
-                    nameColor = new Color(0.9f, 0.5f, 0.5f);
-                    break;
-                case GitChangeType.Modified:
-                    nameColor = new Color(0.95f, 0.75f, 0.4f);
-                    break;
-                case GitChangeType.Renamed:
-                    nameColor = new Color(0.6f, 0.75f, 1.0f);
-                    break;
-                default:
-                    nameColor = Color.white;
-                    break;
-            }
-            nameLabel.style.color = nameColor;
-            headerRow.Add(nameLabel);
 
             nameLabel.RegisterCallback<ClickEvent>(evt =>
             {
+                var info = refs.Info;
+                if (info == null)
+                {
+                    return;
+                }
+
                 if (evt.clickCount >= 2)
                 {
                     CopyToClipboard(info.FileName);
@@ -2119,44 +3112,14 @@ namespace OneKey.GitTools
                 }
             });
 
-            var spacer = new VisualElement();
-            spacer.style.flexGrow = 1f;
-            headerRow.Add(spacer);
-
-            var timeText = info.WorkingTreeTime.HasValue
-                ? info.WorkingTreeTime.Value.ToString("yyyy-MM-dd HH:mm")
-                : "未知时间";
-            var timeLabel = new Label(timeText);
-            timeLabel.style.marginLeft = 8;
-            timeLabel.style.fontSize = 10;
-            timeLabel.style.color = new Color(1f, 1f, 1f, 0.6f);
-            headerRow.Add(timeLabel);
-
-            container.Add(headerRow);
-
-            var pathRow = new VisualElement();
-            pathRow.style.flexDirection = FlexDirection.Row;
-            pathRow.style.alignItems = Align.Center;
-
-            var displayPath = GetFolderPath(info.AssetPath);
-            if (!string.IsNullOrEmpty(info.OriginalPath))
-            {
-                var originalFolder = GetFolderPath(info.OriginalPath);
-                if (!string.IsNullOrEmpty(originalFolder) &&
-                    !string.Equals(originalFolder, displayPath, StringComparison.OrdinalIgnoreCase))
-                {
-                    displayPath = $"{originalFolder} -> {displayPath}";
-                }
-            }
-
-            var pathInfoLabel = new Label(displayPath);
-            pathInfoLabel.style.fontSize = 10;
-            pathInfoLabel.style.color = new Color(1f, 1f, 1f, 0.6f);
-            pathInfoLabel.style.flexGrow = 1f;
-            pathRow.Add(pathInfoLabel);
-
             pathInfoLabel.RegisterCallback<ClickEvent>(evt =>
             {
+                var info = refs.Info;
+                if (info == null)
+                {
+                    return;
+                }
+
                 if (evt.clickCount >= 2)
                 {
                     CopyToClipboard(info.AssetPath);
@@ -2164,30 +3127,123 @@ namespace OneKey.GitTools
                 }
             });
 
-            if (!stagedView)
+            if (excludeButton != null)
             {
-                var excludeButton = new Button(() =>
+                excludeButton.clicked += () =>
                 {
-                    excludedPaths.Add(info.AssetPath);
-                    RefreshListViews();
-                })
-                {
-                    text = "排除"
-                };
-                excludeButton.style.marginLeft = 4;
-                pathRow.Add(excludeButton);
+                    var info = refs.Info;
+                    if (info == null)
+                    {
+                        return;
+                    }
 
-                var discardButton = new Button(() => ConfirmDiscardChange(info))
-                {
-                    text = "放弃更改"
+                    excludedPaths.Add(info.AssetPath);
+                    RequestRefreshListViewsDebounced();
                 };
-                discardButton.style.marginLeft = 4;
-                pathRow.Add(discardButton);
             }
 
-            container.Add(pathRow);
+            if (discardButton != null)
+            {
+                discardButton.clicked += () =>
+                {
+                    var info = refs.Info;
+                    if (info == null)
+                    {
+                        return;
+                    }
+
+                    ConfirmDiscardChange(info);
+                };
+            }
 
             return container;
+        }
+
+        private void BindAssetRow(VisualElement element, int index, bool stagedView)
+        {
+            if (element == null)
+            {
+                return;
+            }
+
+            if (!(element.userData is AssetRowRefs refs))
+            {
+                return;
+            }
+
+            var list = stagedView ? visibleStagedItems : visibleUnstagedItems;
+            if (index < 0 || index >= list.Count)
+            {
+                refs.Info = null;
+                return;
+            }
+
+            var info = list[index];
+            refs.Info = info;
+
+            refs.SelectToggle?.SetValueWithoutNotify(stagedView
+                ? selectedStagedPaths.Contains(info.AssetPath)
+                : selectedUnstagedPaths.Contains(info.AssetPath));
+
+            if (refs.NameLabel != null)
+            {
+                refs.NameLabel.text = info.FileName;
+
+                Color nameColor;
+                switch (info.ChangeType)
+                {
+                    case GitChangeType.Added:
+                        nameColor = new Color(0.5f, 0.85f, 0.5f);
+                        break;
+                    case GitChangeType.Deleted:
+                        nameColor = new Color(0.9f, 0.5f, 0.5f);
+                        break;
+                    case GitChangeType.Modified:
+                        nameColor = new Color(0.95f, 0.75f, 0.4f);
+                        break;
+                    case GitChangeType.Renamed:
+                        nameColor = new Color(0.6f, 0.75f, 1.0f);
+                        break;
+                    default:
+                        nameColor = Color.white;
+                        break;
+                }
+
+                refs.NameLabel.style.color = nameColor;
+            }
+
+            if (refs.TimeLabel != null)
+            {
+                refs.TimeLabel.text = info.WorkingTreeTime.HasValue
+                    ? info.WorkingTreeTime.Value.ToString("yyyy-MM-dd HH:mm")
+                    : "未知时间";
+            }
+
+            if (refs.PathLabel != null)
+            {
+                var displayPath = GetFolderPath(info.AssetPath);
+                if (!string.IsNullOrEmpty(info.OriginalPath))
+                {
+                    var originalFolder = GetFolderPath(info.OriginalPath);
+                    if (!string.IsNullOrEmpty(originalFolder))
+                    {
+                        if (info.ChangeType == GitChangeType.Renamed)
+                        {
+                            displayPath = $"{originalFolder}（删除） -> {displayPath}";
+                        }
+                        else if (info.ChangeType == GitChangeType.Deleted)
+                        {
+                            displayPath = $"{displayPath}（删除） -> {originalFolder}";
+                        }
+                        else if (!string.Equals(originalFolder, displayPath, StringComparison.OrdinalIgnoreCase))
+                        {
+                            displayPath = $"{originalFolder} -> {displayPath}";
+                        }
+                    }
+                }
+
+                refs.PathLabel.text = displayPath;
+            }
         }
 
         private void ConfirmDiscardChange(GitAssetInfo info)
@@ -2296,6 +3352,8 @@ namespace OneKey.GitTools
             targetFolderPrefixes.Clear();
 
             var normalizedTargets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var relevantFileNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var relevantMetaGuids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var rawTarget in targetAssetPaths)
             {
                 var normalized = GitUtility.NormalizeAssetPath(rawTarget);
@@ -2316,6 +3374,7 @@ namespace OneKey.GitTools
 
                 normalizedTargets.Add(normalized);
                 AddRelevantPath(normalized);
+                AddRelevantFileNamesForMoveDetection(relevantFileNames, normalized);
 
                 string[] dependencies;
                 try
@@ -2336,11 +3395,147 @@ namespace OneKey.GitTools
                 foreach (var dep in dependencies)
                 {
                     AddRelevantPath(dep);
+                    AddRelevantFileNamesForMoveDetection(relevantFileNames, dep);
                 }
             }
 
             AddAncestorFolderMetasForCurrentRelevantPaths();
             AddReverseDependenciesFromChanges(currentChanges, normalizedTargets);
+            CollectRelevantMetaGuidsFromChanges(currentChanges, relevantMetaGuids);
+            AddPossiblyMovedDeletionsFromChanges(currentChanges, relevantFileNames, relevantMetaGuids);
+        }
+
+        private void CollectRelevantMetaGuidsFromChanges(IReadOnlyList<GitChangeEntry> currentChanges, HashSet<string> relevantMetaGuids)
+        {
+            if (currentChanges == null || currentChanges.Count == 0)
+            {
+                return;
+            }
+
+            if (relevantMetaGuids == null)
+            {
+                return;
+            }
+
+            foreach (var entry in currentChanges)
+            {
+                if (entry.ChangeType == GitChangeType.Deleted)
+                {
+                    continue;
+                }
+
+                var path = GitUtility.NormalizeAssetPath(entry.Path);
+                if (string.IsNullOrEmpty(path))
+                {
+                    continue;
+                }
+
+                if (relevantPaths.Count > 0 && !relevantPaths.Contains(path))
+                {
+                    continue;
+                }
+
+                var metaPath = path.EndsWith(".meta", StringComparison.OrdinalIgnoreCase) ? path : $"{path}.meta";
+                if (GitUtility.TryGetMetaGuidFromDisk(metaPath, out var guid) && !string.IsNullOrEmpty(guid))
+                {
+                    relevantMetaGuids.Add(guid);
+                }
+            }
+        }
+
+        private static void AddRelevantFileNamesForMoveDetection(HashSet<string> fileNames, string unityPath)
+        {
+            if (fileNames == null || string.IsNullOrEmpty(unityPath))
+            {
+                return;
+            }
+
+            var normalized = GitUtility.NormalizeAssetPath(unityPath);
+            if (string.IsNullOrEmpty(normalized))
+            {
+                return;
+            }
+
+            var fileName = Path.GetFileName(normalized);
+            if (!string.IsNullOrEmpty(fileName))
+            {
+                fileNames.Add(fileName);
+
+                // Also track the corresponding .meta file name so we can surface deleted metas from moves.
+                if (!fileName.EndsWith(".meta", StringComparison.OrdinalIgnoreCase))
+                {
+                    fileNames.Add($"{fileName}.meta");
+                }
+            }
+        }
+
+        private void AddPossiblyMovedDeletionsFromChanges(
+            IReadOnlyList<GitChangeEntry> currentChanges,
+            HashSet<string> relevantFileNames,
+            HashSet<string> relevantMetaGuids)
+        {
+            if (currentChanges == null || currentChanges.Count == 0)
+            {
+                return;
+            }
+
+            if (relevantFileNames == null || relevantFileNames.Count == 0)
+            {
+                relevantFileNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            relevantMetaGuids ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            var gitRoot = GitUtility.ProjectRoot;
+            _ = GitUtility.UnityProjectFolder;
+
+            // If Git does not detect a rename (and outputs "A + D" instead),
+            // the old path deletion may no longer be in the dependency graph (only the new path is referenced).
+            // Heuristic: include deleted entries whose file name matches any target/dependency file name.
+            foreach (var entry in currentChanges)
+            {
+                if (entry.ChangeType != GitChangeType.Deleted)
+                {
+                    continue;
+                }
+
+                var deletedPath = GitUtility.NormalizeAssetPath(entry.Path);
+                if (string.IsNullOrEmpty(deletedPath))
+                {
+                    continue;
+                }
+
+                var deletedName = Path.GetFileName(deletedPath);
+                if (string.IsNullOrEmpty(deletedName))
+                {
+                    continue;
+                }
+
+                var matched = relevantFileNames.Contains(deletedName);
+                if (!matched && relevantMetaGuids.Count > 0 &&
+                    !string.IsNullOrEmpty(gitRoot))
+                {
+                    var deletedMetaUnityPath = deletedPath.EndsWith(".meta", StringComparison.OrdinalIgnoreCase)
+                        ? deletedPath
+                        : $"{deletedPath}.meta";
+
+                    if (GitUtility.TryGetGitRelativePath(deletedMetaUnityPath, out var gitRelativeMetaPath) &&
+                        GitUtility.TryGetMetaGuidFromHead(gitRoot, gitRelativeMetaPath, out var deletedGuid) &&
+                        !string.IsNullOrEmpty(deletedGuid) &&
+                        relevantMetaGuids.Contains(deletedGuid))
+                    {
+                        matched = true;
+                    }
+                }
+
+                if (!matched)
+                {
+                    continue;
+                }
+
+                AddRelevantPath(deletedPath);
+                AddAncestorFolderMetas(deletedPath);
+            }
         }
 
         private void AddRelevantPath(string path)
@@ -2486,7 +3681,7 @@ namespace OneKey.GitTools
             if (startTimeField != null) startTimeField.value = startTimeInput;
             if (endTimeField != null) endTimeField.value = endTimeInput;
 
-            RefreshListViews();
+            RequestRefreshListViewsDebounced();
         }
 
         private string GetAssetFolderPath()
@@ -2544,10 +3739,97 @@ namespace OneKey.GitTools
             return Path.Combine(libraryFolder, CommitHistoryFileName);
         }
 
+        private static string GetStagedAllowListFilePath()
+        {
+            var projectFolder = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
+            var libraryFolder = Path.Combine(projectFolder, "Library");
+            return Path.Combine(libraryFolder, StagedAllowListFileName);
+        }
+
+        private void LoadStagedAllowList()
+        {
+            stagedAllowList.Clear();
+
+            var path = GetStagedAllowListFilePath();
+            if (!File.Exists(path))
+            {
+                return;
+            }
+
+            try
+            {
+                var json = File.ReadAllText(path);
+                if (string.IsNullOrWhiteSpace(json))
+                {
+                    return;
+                }
+
+                var data = JsonUtility.FromJson<StagedAllowListData>(json);
+                if (data?.gitRelativePaths == null)
+                {
+                    return;
+                }
+
+                foreach (var p in data.gitRelativePaths)
+                {
+                    if (string.IsNullOrWhiteSpace(p))
+                    {
+                        continue;
+                    }
+
+                    stagedAllowList.Add(GitUtility.NormalizeAssetPath(p.Trim()));
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"GitQuickCommit: 读取暂存白名单失败: {ex.Message}");
+                stagedAllowList.Clear();
+            }
+        }
+
+        private void SaveStagedAllowList()
+        {
+            var path = GetStagedAllowListFilePath();
+            try
+            {
+                var directory = Path.GetDirectoryName(path);
+                if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+                {
+                    Directory.CreateDirectory(directory);
+                }
+
+                if (stagedAllowList.Count == 0)
+                {
+                    if (File.Exists(path))
+                    {
+                        File.Delete(path);
+                    }
+
+                    return;
+                }
+
+                var data = new StagedAllowListData
+                {
+                    gitRelativePaths = stagedAllowList.OrderBy(p => p, StringComparer.OrdinalIgnoreCase).ToList()
+                };
+                File.WriteAllText(path, JsonUtility.ToJson(data));
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"GitQuickCommit: 保存暂存白名单失败: {ex.Message}");
+            }
+        }
+
         [Serializable]
         private class CommitHistoryData
         {
             public List<string> entries = new List<string>();
+        }
+
+        [Serializable]
+        private class StagedAllowListData
+        {
+            public List<string> gitRelativePaths = new List<string>();
         }
 
         private static void CopyToClipboard(string content)

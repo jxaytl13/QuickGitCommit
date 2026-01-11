@@ -167,11 +167,27 @@
 
 工具使用 `git status --porcelain=v1 -z` 并按 NUL 分隔解析，能更稳健地处理包含空格、换行等字符的路径；但仍建议避免极端文件名（特别是包含控制字符的名称）。
 
+### 5.7 打开窗口时右侧“待提交”已有内容
+
+右侧“待提交/已暂存”列表读取的是 Git 暂存区（index），不是工具内部缓存。
+
+因此如果你曾在命令行或其他客户端（例如 UGit/SourceTree）执行过 `git add`（或在 `git pull --autostash` 等流程中被恢复了暂存状态），再次打开窗口时右侧可能已经有内容。
+
+处理方式：
+
+- 在右侧勾选条目 → 点击 `<` 移出（等价 `git reset HEAD -- <path>`）
+- 或命令行执行 `git restore --staged .` 清空暂存区
+- 打开窗口会自动将“非本工具暂存”的条目从暂存区移出
+
 ## 6. 数据存储位置
 
 提交说明历史会保存到：
 
 - `Library/QuickGitCommitHistory.json`
+
+本工具“暂存白名单”（用于自动清理外部暂存）会保存到：
+
+- `Library/QuickGitCommitStagedAllowList.json`
 
 说明：
 

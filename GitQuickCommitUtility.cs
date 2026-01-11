@@ -36,6 +36,60 @@ namespace OneKey.GitTools
         }
     }
 
+    internal enum UnityAssetTypeFilter
+    {
+        All,
+        AnimationClip,
+        AudioClip,
+        AudioMixer,
+        ComputeShader,
+        Font,
+        GUISkin,
+        Material,
+        Mesh,
+        Model,
+        PhysicMaterial,
+        Prefab,
+        Scene,
+        Script,
+        Shader,
+        Sprite,
+        Texture,
+        VideoClip,
+        VisualEffectAsset,
+        Unknown
+    }
+
+    internal static class UnityAssetTypeFilterExtensions
+    {
+        public static string ToDisplayName(this UnityAssetTypeFilter type)
+        {
+            return type switch
+            {
+                UnityAssetTypeFilter.All => "All",
+                UnityAssetTypeFilter.AnimationClip => "Animation Clip",
+                UnityAssetTypeFilter.AudioClip => "Audio Clip",
+                UnityAssetTypeFilter.AudioMixer => "Audio Mixer",
+                UnityAssetTypeFilter.ComputeShader => "Compute Shader",
+                UnityAssetTypeFilter.Font => "Font",
+                UnityAssetTypeFilter.GUISkin => "GUI Skin",
+                UnityAssetTypeFilter.Material => "Material",
+                UnityAssetTypeFilter.Mesh => "Mesh",
+                UnityAssetTypeFilter.Model => "Model",
+                UnityAssetTypeFilter.PhysicMaterial => "Physic Material",
+                UnityAssetTypeFilter.Prefab => "Prefab",
+                UnityAssetTypeFilter.Scene => "Scene",
+                UnityAssetTypeFilter.Script => "Script",
+                UnityAssetTypeFilter.Shader => "Shader",
+                UnityAssetTypeFilter.Sprite => "Sprite",
+                UnityAssetTypeFilter.Texture => "Texture",
+                UnityAssetTypeFilter.VideoClip => "Video Clip",
+                UnityAssetTypeFilter.VisualEffectAsset => "Visual Effect Asset",
+                _ => "Unknown"
+            };
+        }
+    }
+
     [Serializable]
     internal class GitAssetInfo
     {
@@ -100,6 +154,141 @@ namespace OneKey.GitTools
         private const int GitCommandTimeoutShortMs = 30_000;
         private const int GitCommandTimeoutMediumMs = 120_000;
         private const int GitCommandTimeoutLongMs = 300_000;
+
+        internal static bool IsMatchAssetTypeFilter(string unityAssetPath, UnityAssetTypeFilter filter)
+        {
+            if (filter == UnityAssetTypeFilter.All)
+            {
+                return true;
+            }
+
+            return DetectAssetTypeFilter(unityAssetPath) == filter;
+        }
+
+        internal static UnityAssetTypeFilter DetectAssetTypeFilter(string unityAssetPath)
+        {
+            if (string.IsNullOrWhiteSpace(unityAssetPath))
+            {
+                return UnityAssetTypeFilter.Unknown;
+            }
+
+            var path = NormalizeAssetPath(unityAssetPath);
+            if (path.EndsWith(".meta", StringComparison.OrdinalIgnoreCase))
+            {
+                path = path.Substring(0, path.Length - 5);
+            }
+
+            var extension = Path.GetExtension(path)?.ToLowerInvariant() ?? string.Empty;
+            switch (extension)
+            {
+                case ".anim":
+                    return UnityAssetTypeFilter.AnimationClip;
+                case ".wav":
+                case ".mp3":
+                case ".ogg":
+                case ".aiff":
+                case ".aif":
+                case ".mod":
+                case ".it":
+                case ".s3m":
+                case ".xm":
+                    return UnityAssetTypeFilter.AudioClip;
+                case ".mixer":
+                    return UnityAssetTypeFilter.AudioMixer;
+                case ".compute":
+                    return UnityAssetTypeFilter.ComputeShader;
+                case ".ttf":
+                case ".otf":
+                case ".ttc":
+                case ".dfont":
+                case ".fnt":
+                    return UnityAssetTypeFilter.Font;
+                case ".guiskin":
+                    return UnityAssetTypeFilter.GUISkin;
+                case ".mat":
+                    return UnityAssetTypeFilter.Material;
+                case ".prefab":
+                    return UnityAssetTypeFilter.Prefab;
+                case ".unity":
+                    return UnityAssetTypeFilter.Scene;
+                case ".cs":
+                case ".js":
+                case ".boo":
+                case ".asmdef":
+                case ".asmref":
+                    return UnityAssetTypeFilter.Script;
+                case ".shader":
+                case ".cginc":
+                case ".hlsl":
+                case ".glslinc":
+                    return UnityAssetTypeFilter.Shader;
+                case ".physicmaterial":
+                    return UnityAssetTypeFilter.PhysicMaterial;
+                case ".fbx":
+                case ".obj":
+                case ".dae":
+                case ".3ds":
+                case ".dxf":
+                case ".blend":
+                case ".max":
+                case ".c4d":
+                case ".mb":
+                case ".ma":
+                    return UnityAssetTypeFilter.Model;
+                case ".mp4":
+                case ".mov":
+                case ".avi":
+                case ".webm":
+                case ".m4v":
+                case ".ogv":
+                case ".wmv":
+                    return UnityAssetTypeFilter.VideoClip;
+                case ".vfx":
+                case ".vfxgraph":
+                    return UnityAssetTypeFilter.VisualEffectAsset;
+                case ".spriteatlas":
+                    return UnityAssetTypeFilter.Sprite;
+                case ".png":
+                case ".jpg":
+                case ".jpeg":
+                case ".tga":
+                case ".psd":
+                case ".exr":
+                case ".tif":
+                case ".tiff":
+                case ".bmp":
+                case ".gif":
+                case ".dds":
+                case ".hdr":
+                    return DetectTextureOrSprite(path);
+            }
+
+            var mainType = AssetDatabase.GetMainAssetTypeAtPath(path);
+            if (mainType != null && typeof(Mesh).IsAssignableFrom(mainType))
+            {
+                return UnityAssetTypeFilter.Mesh;
+            }
+
+            return UnityAssetTypeFilter.Unknown;
+        }
+
+        private static UnityAssetTypeFilter DetectTextureOrSprite(string unityAssetPath)
+        {
+            try
+            {
+                var importer = AssetImporter.GetAtPath(unityAssetPath) as TextureImporter;
+                if (importer != null && importer.textureType == TextureImporterType.Sprite)
+                {
+                    return UnityAssetTypeFilter.Sprite;
+                }
+            }
+            catch
+            {
+                // ignored: deleted/missing asset or importer not available
+            }
+
+            return UnityAssetTypeFilter.Texture;
+        }
 
         private static string cachedProjectRoot;
         private static string cachedUnityProjectFolder;
@@ -283,6 +472,15 @@ namespace OneKey.GitTools
 
                 var workingTime = GetWorkingTreeTimestamp(unityRelativePath, changeType);
                 result.Add(new GitChangeEntry(unityRelativePath, unityOriginalPath, changeType, workingTime, isStaged, isUnstaged));
+
+                // For rename/move entries, also emit an explicit "Deleted" entry for the original path so UI can show it.
+                if (changeType == GitChangeType.Renamed &&
+                    !string.IsNullOrEmpty(unityOriginalPath) &&
+                    !string.Equals(unityOriginalPath, unityRelativePath, StringComparison.OrdinalIgnoreCase))
+                {
+                    var deletedTime = GetWorkingTreeTimestamp(unityOriginalPath, GitChangeType.Deleted);
+                    result.Add(new GitChangeEntry(unityOriginalPath, unityRelativePath, GitChangeType.Deleted, deletedTime, isStaged, isUnstaged));
+                }
             }
 
             return result;
@@ -509,40 +707,40 @@ namespace OneKey.GitTools
                 return false;
             }
 
-            var total = 0;
-            var succeeded = 0;
-            var firstError = string.Empty;
+            var addPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var updatePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var request in requests)
             {
-                if (string.IsNullOrEmpty(request.GitRelativePath))
+                var gitPath = request.GitRelativePath?.Trim();
+                if (string.IsNullOrEmpty(gitPath))
                 {
                     continue;
                 }
 
-                total++;
-
-                var arguments = request.ChangeType == GitChangeType.Deleted
-                    ? BuildGitArgs("add -u", request.GitRelativePath)
-                    : BuildGitArgs("add", request.GitRelativePath);
-
-                if (TryRunGitCommandNoLog(gitRoot, arguments, GitCommandTimeoutShortMs, out _, out var stderr))
+                if (request.ChangeType == GitChangeType.Deleted)
                 {
-                    succeeded++;
-                    continue;
+                    updatePaths.Add(gitPath);
+                    addPaths.Remove(gitPath);
                 }
-
-                if (string.IsNullOrEmpty(firstError) && !string.IsNullOrEmpty(stderr))
+                else if (!updatePaths.Contains(gitPath))
                 {
-                    firstError = stderr.Trim();
+                    addPaths.Add(gitPath);
                 }
             }
+
+            var total = addPaths.Count + updatePaths.Count;
+            var succeeded = 0;
+            var firstError = string.Empty;
 
             if (total == 0)
             {
                 summary = "没有可发送的变更。";
                 return false;
             }
+
+            TryRunGitPathCommandsBatched(gitRoot, "add", addPaths, ref succeeded, ref firstError);
+            TryRunGitPathCommandsBatched(gitRoot, "add -u", updatePaths, ref succeeded, ref firstError);
 
             summary = $"已发送至待提交: {succeeded}/{total} 个条目。";
             if (succeeded == 0 && !string.IsNullOrEmpty(firstError))
@@ -563,36 +761,29 @@ namespace OneKey.GitTools
                 return false;
             }
 
-            var total = 0;
-            var succeeded = 0;
-            var firstError = string.Empty;
-
+            var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var gitPath in gitRelativePaths)
             {
-                if (string.IsNullOrEmpty(gitPath))
+                var trimmed = gitPath?.Trim();
+                if (string.IsNullOrEmpty(trimmed))
                 {
                     continue;
                 }
 
-                total++;
-                var arguments = BuildGitArgs("reset HEAD", gitPath);
-                if (TryRunGitCommandNoLog(gitRoot, arguments, GitCommandTimeoutShortMs, out _, out var stderr))
-                {
-                    succeeded++;
-                    continue;
-                }
-
-                if (string.IsNullOrEmpty(firstError) && !string.IsNullOrEmpty(stderr))
-                {
-                    firstError = stderr.Trim();
-                }
+                paths.Add(trimmed);
             }
+
+            var total = paths.Count;
+            var succeeded = 0;
+            var firstError = string.Empty;
 
             if (total == 0)
             {
                 summary = "没有可移出的待提交项。";
                 return false;
             }
+
+            TryRunGitPathCommandsBatched(gitRoot, "reset HEAD", paths, ref succeeded, ref firstError);
 
             summary = $"已从待提交移出: {succeeded}/{total} 个条目。";
             if (succeeded == 0 && !string.IsNullOrEmpty(firstError))
@@ -601,6 +792,109 @@ namespace OneKey.GitTools
             }
 
             return succeeded > 0;
+        }
+
+        private const int GitMaxPathsPerCommand = 200;
+        private const int GitMaxArgumentsLength = 30_000;
+
+        private static void TryRunGitPathCommandsBatched(
+            string gitRoot,
+            string baseArguments,
+            IEnumerable<string> gitRelativePaths,
+            ref int succeeded,
+            ref string firstError)
+        {
+            if (gitRelativePaths == null)
+            {
+                return;
+            }
+
+            var normalizedPaths = gitRelativePaths
+                .Where(p => !string.IsNullOrWhiteSpace(p))
+                .Select(p => p.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (normalizedPaths.Count == 0)
+            {
+                return;
+            }
+
+            foreach (var chunk in ChunkGitPaths(baseArguments, normalizedPaths))
+            {
+                if (chunk.Count == 0)
+                {
+                    continue;
+                }
+
+                var arguments = BuildGitArgs(baseArguments, chunk.ToArray());
+                var timeout = chunk.Count > 1 ? GitCommandTimeoutMediumMs : GitCommandTimeoutShortMs;
+
+                if (TryRunGitCommandNoLog(gitRoot, arguments, timeout, out _, out var stderr))
+                {
+                    succeeded += chunk.Count;
+                    continue;
+                }
+
+                if (string.IsNullOrEmpty(firstError) && !string.IsNullOrEmpty(stderr))
+                {
+                    firstError = stderr.Trim();
+                }
+
+                foreach (var path in chunk)
+                {
+                    var oneArguments = BuildGitArgs(baseArguments, path);
+                    if (TryRunGitCommandNoLog(gitRoot, oneArguments, GitCommandTimeoutShortMs, out _, out var oneErr))
+                    {
+                        succeeded++;
+                        continue;
+                    }
+
+                    if (string.IsNullOrEmpty(firstError) && !string.IsNullOrEmpty(oneErr))
+                    {
+                        firstError = oneErr.Trim();
+                    }
+                }
+            }
+        }
+
+        private static IEnumerable<List<string>> ChunkGitPaths(string baseArguments, IReadOnlyList<string> gitRelativePaths)
+        {
+            var current = new List<string>();
+            var currentLength = baseArguments.Length + 3; // includes " --"
+
+            foreach (var path in gitRelativePaths)
+            {
+                if (string.IsNullOrWhiteSpace(path))
+                {
+                    continue;
+                }
+
+                var trimmed = path.Trim();
+                if (trimmed.Length == 0)
+                {
+                    continue;
+                }
+
+                var quoted = QuoteGitArgument(trimmed);
+                var additionalLength = 1 + quoted.Length; // leading space
+
+                if (current.Count > 0 &&
+                    (current.Count >= GitMaxPathsPerCommand || currentLength + additionalLength > GitMaxArgumentsLength))
+                {
+                    yield return current;
+                    current = new List<string>();
+                    currentLength = baseArguments.Length + 3;
+                }
+
+                current.Add(trimmed);
+                currentLength += additionalLength;
+            }
+
+            if (current.Count > 0)
+            {
+                yield return current;
+            }
         }
 
         internal static bool CommitGit(string gitRoot, string message, out string summary)
@@ -709,6 +1003,78 @@ namespace OneKey.GitTools
 
             sb.Append('"');
             return sb.ToString();
+        }
+
+        private static readonly Regex UnityMetaGuidRegex = new Regex(@"^\s*guid:\s*([0-9a-fA-F]+)\s*$", RegexOptions.Multiline | RegexOptions.Compiled);
+
+        internal static bool TryGetMetaGuidFromDisk(string unityMetaPath, out string guid)
+        {
+            guid = null;
+
+            if (string.IsNullOrEmpty(unityMetaPath))
+            {
+                return false;
+            }
+
+            var absolutePath = ResolveAbsolutePath(unityMetaPath);
+            if (string.IsNullOrEmpty(absolutePath) || !File.Exists(absolutePath))
+            {
+                return false;
+            }
+
+            try
+            {
+                var content = File.ReadAllText(absolutePath);
+                return TryParseUnityMetaGuid(content, out guid);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        internal static bool TryGetMetaGuidFromHead(string gitRoot, string gitRelativeMetaPath, out string guid)
+        {
+            guid = null;
+
+            if (string.IsNullOrEmpty(gitRoot) || string.IsNullOrEmpty(gitRelativeMetaPath))
+            {
+                return false;
+            }
+
+            var normalized = gitRelativeMetaPath.Trim().Replace('\\', '/');
+            if (normalized.Length == 0)
+            {
+                return false;
+            }
+
+            var objectSpec = $"HEAD:{normalized}";
+            var arguments = $"show {QuoteGitArgument(objectSpec)}";
+            if (!TryRunGitCommandNoLog(gitRoot, arguments, GitCommandTimeoutShortMs, out var stdout, out _))
+            {
+                return false;
+            }
+
+            return TryParseUnityMetaGuid(stdout, out guid);
+        }
+
+        private static bool TryParseUnityMetaGuid(string content, out string guid)
+        {
+            guid = null;
+
+            if (string.IsNullOrEmpty(content))
+            {
+                return false;
+            }
+
+            var match = UnityMetaGuidRegex.Match(content);
+            if (!match.Success || match.Groups.Count < 2)
+            {
+                return false;
+            }
+
+            guid = match.Groups[1].Value?.Trim();
+            return !string.IsNullOrEmpty(guid);
         }
 
         private static string BuildGitArgs(string baseArguments, params string[] paths)

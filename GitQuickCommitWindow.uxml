@@ -1,13 +1,14 @@
 <ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements" editor-extension-mode="False">
     <ui:VisualElement name="rootContainer" class="root-container" style="flex-grow: 1; justify-content: space-between; width: auto; height: auto; padding-top: 5px; padding-right: 5px; padding-bottom: 5px; padding-left: 5px;">
         <ui:VisualElement style="flex-grow: 1; width: 100%; height: 100%;">
-            <ui:VisualElement name="headerCard" class="card mb-4" style="height: 80px; justify-content: space-between; width: 100%;">
+            <ui:VisualElement name="headerCard" class="card mb-4" style="min-height: 80px; justify-content: flex-start; width: 100%; padding-bottom: 4px;">
                 <ui:VisualElement name="headerRow" class="row" style="flex-direction: row; justify-content: space-between; height: 25px; align-items: stretch;">
                     <uie:ObjectField name="targetField" label="目标资源" class="flex-grow-field" style="flex-grow: 1;" />
                     <ui:Button name="clearExcludeButton" text="清除排除" style="display: flex; width: 100px; flex-shrink: 0; flex-grow: 0;" />
                 </ui:VisualElement>
                 <ui:Label name="pathLabel" class="secondary-text" />
-                <ui:Label name="operationHintLabel" text="提示：单击文件名定位，双击复制文件名；双击路径复制全路径。" class="hint-text" />
+                <ui:Label name="operationHintLabel" text="提示：单击文件名定位，双击复制文件名；双击路径复制全路径。" class="hint-text" style="color: rgb(255, 215, 0);" />
+                <ui:Label name="saveToDiskHintLabel" class="hint-text" style="color: rgb(255, 90, 90); white-space: normal; -unity-font-style: bold; font-size: 11px;" />
                 <ui:Label name="statusLabel" />
             </ui:VisualElement>
             <ui:VisualElement name="filterBox" class="card mb-4" style="width: 100%; height: auto;">
@@ -30,6 +31,10 @@
                     <ui:VisualElement name="presetContainer" class="row preset-container" style="flex-direction: row; justify-content: flex-end;">
                         <ui:Label name="presetLabel" text="时间" style="margin-right: 10px; -unity-text-align: middle-left;" />
                         <ui:DropdownField name="timePresetField" class="dropdown-preset" style="width: 100px;" />
+                    </ui:VisualElement>
+                    <ui:VisualElement name="assetTypeContainer" class="row preset-container" style="flex-direction: row; justify-content: flex-end;">
+                        <ui:Label name="assetTypeLabel" text="类型" style="margin-right: 10px; -unity-text-align: middle-left;" />
+                        <uie:ToolbarMenu name="assetTypeMenu" class="dropdown-preset" style="width: 180px;" />
                     </ui:VisualElement>
                 </ui:VisualElement>
                 <ui:Label name="timeRangeLabel" text="时间范围 (格式: yyyy-MM-dd HH:mm)" class="time-range-label" style="padding-right: 0;" />
@@ -55,7 +60,7 @@
                         <ui:VisualElement name="leftSpacer" class="spacer" style="flex-grow: 2; flex-shrink: 0; display: none;" />
                         <ui:Label name="unstagedHeaderLabel" style="flex-grow: 1; display: flex; -unity-text-align: middle-right;" />
                     </ui:VisualElement>
-                    <ui:ScrollView name="unstagedScrollView" class="scroll-fill" style="flex-grow: 1; height: 100%; width: 100%;" />
+                    <ui:ListView name="unstagedScrollView" class="scroll-fill" style="flex-grow: 1; height: 100%; width: 100%;" />
                 </ui:VisualElement>
                 <ui:VisualElement name="middleColumn" class="middle-column" style="width: 40px; justify-content: center; flex-shrink: 1; height: 100%; align-items: center;">
                     <ui:Button name="toStagedButton" text="&gt;" class="arrow-button" style="flex-grow: 0; width: 40px; height: 40px;" />
@@ -70,7 +75,7 @@
                         <ui:VisualElement name="rightSpacer" class="spacer" style="flex-grow: 1; display: none;" />
                         <ui:Label name="stagedHeaderLabel" style="flex-grow: 1; display: flex; -unity-text-align: middle-right;" />
                     </ui:VisualElement>
-                    <ui:ScrollView name="stagedScrollView" class="scroll-fill" style="flex-grow: 1; width: 100%; height: 100%;" />
+                    <ui:ListView name="stagedScrollView" class="scroll-fill" style="flex-grow: 1; width: 100%; height: 100%;" />
                 </ui:VisualElement>
             </ui:VisualElement>
         </ui:VisualElement>
@@ -82,8 +87,8 @@
                 <ui:Button name="historyButton" text="记录" class="history-button" />
             </ui:VisualElement>
             <ui:VisualElement name="commitRow" class="row commit-row" style="flex-direction: row; justify-content: space-between;">
-                <ui:Button name="commitButton" text="提交到本地" class="commit-button-local" style="flex-grow: 1;" />
-                <ui:Button name="commitAndPushButton" text="提交并推送" class="commit-button-push" style="flex-grow: 1;" />
+                <ui:Button name="commitButton" text="提交到本地" class="commit-button-local" style="flex-grow: 1; margin-right: 6px; background-color: rgb(59, 130, 246); color: rgb(255, 255, 255); -unity-font-style: bold;" />
+                <ui:Button name="commitAndPushButton" text="提交并推送" class="commit-button-push" style="flex-grow: 1; margin-left: 6px; background-color: rgb(34, 197, 94); color: rgb(255, 255, 255); -unity-font-style: bold;" />
             </ui:VisualElement>
         </ui:VisualElement>
         <ui:VisualElement name="historyDropdown" style="display: none; position: absolute; left: 20%; top: 20%; right: 20%; bottom: 20%; flex-grow: 1; background-color: rgb(27, 27, 27); border-left-width: 1px; border-right-width: 1px; border-top-width: 1px; border-bottom-width: 1px; border-left-color: rgb(60, 60, 60); border-right-color: rgb(60, 60, 60); border-top-color: rgb(60, 60, 60); border-bottom-color: rgb(60, 60, 60); border-top-left-radius: 4px; border-top-right-radius: 4px; border-bottom-left-radius: 4px; border-bottom-right-radius: 4px; padding-left: 6px; padding-right: 6px; padding-top: 6px; padding-bottom: 6px;">
