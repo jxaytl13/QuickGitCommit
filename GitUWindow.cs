@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using UnityEditor;
+using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.UIElements;
 using UnityEditor.UIElements;
@@ -20,6 +21,10 @@ namespace TLNexus.GitU
         private const int MaxCommitHistoryDisplayEntries = 100;
         private const string SortKeyPrefsKeyPrefix = "TLNexus.GitU.SortKey:";
         private const string SortOrderPrefsKeyPrefix = "TLNexus.GitU.SortOrder:";
+        private const string LanguagePrefKey = "TLNexus.GitU.IsChinese";
+        private const string AutoSaveBeforeOpenPrefsKeyPrefix = "TLNexus.GitU.AutoSaveBeforeOpen:";
+        private const string AutoOpenGitClientAfterCommitPrefsKeyPrefix = "TLNexus.GitU.AutoOpenGitClientAfterCommit:";
+        private const string GitClientPathPrefsKeyPrefix = "TLNexus.GitU.GitClientPath:";
         private const string StagedAllowListFileName = "GitUStagedAllowList.json";
         private const string LegacyStagedAllowListFileName = "QuickGitCommitStagedAllowList.json";
         private const string AssetTypeFilterPrefsKeyPrefix = "TLNexus.GitU.AssetTypeFilters:";
@@ -27,12 +32,19 @@ namespace TLNexus.GitU
         private const string AddedColorHex = "#80D980";
         private const string ModifiedColorHex = "#F2BF66";
         private const string DeletedColorHex = "#E68080";
-        private const string GitStatusFormat = "Git \u72b6\u6001\uff1a\u5f85\u63d0\u4ea4 {0}\uff0c\u672a\u6682\u5b58 {1}";
+        private const string GitStatusFormatZh = "Git \u72b6\u6001\uff1a\u5f85\u63d0\u4ea4 {0}\uff0c\u672a\u6682\u5b58 {1}";
+        private const string GitStatusFormatEn = "Git Status: Staged {0}, Unstaged {1}";
         private const string AddedSegmentFormat = "<color={0}>\u65b0\u589e {1}</color>";
         private const string ModifiedSegmentFormat = "<color={0}>\u4fee\u6539 {1}</color>";
         private const string DeletedSegmentFormat = "<color={0}>\u5220\u9664 {1}</color>";
-        private const string SearchPlaceholderText = "\u641c\u7d22\u6587\u4ef6 / \u8def\u5f84 / \u53d8\u66f4\u2026";
-        private const string CommitMessagePlaceholderText = "\u5728\u8fd9\u91cc\u586b\u5199\u63d0\u4ea4\u4fe1\u606f\u2026";
+        private const string SearchPlaceholderTextZh = "\u641c\u7d22\u6587\u4ef6 / \u8def\u5f84 / \u53d8\u66f4\u2026";
+        private const string SearchPlaceholderTextEn = "Search files / paths / changes...";
+        private const string CommitMessagePlaceholderTextZh = "\u5728\u8fd9\u91cc\u586b\u5199\u63d0\u4ea4\u4fe1\u606f\u2026";
+        private const string CommitMessagePlaceholderTextEn = "Write commit message here...";
+        private const string SearchTooltipZh = "\u641c\u7d22\u6587\u4ef6\u3001\u8def\u5f84\u6216\u53d8\u66f4\u2026";
+        private const string SearchTooltipEn = "Search files, paths, or changes...";
+        private const string SaveToDiskHintZh = "\u91cd\u8981\u63d0\u793a\uff1a\u6539\u6750\u8d28/\u52a8\u753b/Prefab/\u573a\u666f\u540e\uff0c\u8bf7\u5148 Ctrl+S\uff08\u6216 Save Assets\uff09\u5199\u76d8\uff0c\u518d\u6253\u5f00/\u5237\u65b0\uff1b\u5426\u5219\u53ef\u80fd\u6f0f\u663e\u793a\u3002";
+        private const string SaveToDiskHintEn = "Important: After editing materials/animations/prefabs/scenes, press Ctrl+S (or Save Assets) before opening/refreshing, otherwise changes may not show up.";
         private static readonly Color SearchFieldTextColor = new Color(1f, 1f, 1f, 0.5f);
         private static readonly Color SearchFieldPlaceholderTextColor = new Color(1f, 1f, 1f, 0.5f);
         private static readonly Color CommitFieldTextColor = Color.white;
@@ -113,15 +125,7 @@ namespace TLNexus.GitU
         private bool showDeleted = true;
         private static readonly UnityAssetTypeFilter[] defaultSelectedAssetTypeFilters =
         {
-            UnityAssetTypeFilter.AnimationClip,
-            UnityAssetTypeFilter.Font,
-            UnityAssetTypeFilter.Material,
-            UnityAssetTypeFilter.Mesh,
-            UnityAssetTypeFilter.Prefab,
-            UnityAssetTypeFilter.Scene,
-            UnityAssetTypeFilter.Shader,
-            UnityAssetTypeFilter.Sprite,
-            UnityAssetTypeFilter.Texture
+            UnityAssetTypeFilter.All
         };
 
         private readonly HashSet<UnityAssetTypeFilter> assetTypeFilters = new HashSet<UnityAssetTypeFilter>(defaultSelectedAssetTypeFilters);
@@ -131,6 +135,10 @@ namespace TLNexus.GitU
         private string repositoryStatusMessage = "\u6b63\u5728\u68c0\u6d4b Git \u72b6\u6001...";
         private bool searchPlaceholderActive;
         private bool commitMessagePlaceholderActive;
+        private bool isChineseUi;
+        private bool autoSaveBeforeOpen;
+        private bool autoOpenGitClientAfterCommit;
+        private string gitClientPath;
         private List<string> commitHistory;
         private List<string> savedCommitHistory;
         private List<string> fallbackCommitHistory;
@@ -167,10 +175,14 @@ namespace TLNexus.GitU
         private Button deletedButton;
         private ToolbarMenu assetTypeMenu;
         private TextField searchField;
+        private Label unstagedTitleLabel;
         private Label unstagedHeaderLabel;
+        private Label stagedTitleLabel;
         private Label stagedHeaderLabel;
         private ListView unstagedScrollView;
         private ListView stagedScrollView;
+        private Label commitMessageTitleLabel;
+        private Label commitMessageHintLabel;
         private TextField commitMessageField;
         private Button commitButton;
         private Button commitAndPushButton;
@@ -178,6 +190,7 @@ namespace TLNexus.GitU
         private Button refreshButton;
         private Button repositoryStatusUpButton;
         private Label sortInfoLabel;
+        private Button settingsButton;
         private VisualElement historyDropdown;
         private ListView historyListView;
         private Label repositoryStatusLabel;
@@ -188,6 +201,10 @@ namespace TLNexus.GitU
         private VisualElement stagedListContainer;
         private VisualElement unstagedEmptyHintOverlay;
         private VisualElement stagedEmptyHintOverlay;
+        private Label unstagedEmptyHintLabel;
+        private Label stagedEmptyHintLabel;
+        private Label historyTitleLabel;
+        private Label historyHintLabel;
 
         private readonly List<GitAssetInfo> visibleUnstagedItems = new List<GitAssetInfo>();
         private readonly List<GitAssetInfo> visibleStagedItems = new List<GitAssetInfo>();
@@ -202,10 +219,15 @@ namespace TLNexus.GitU
         private int sortMenuPositionRequestId;
         private int sortMenuPendingPositionAttempts;
 
+        private GitUSettingsOverlay settingsOverlay;
+
         private static string AssetTypeFilterPrefsKey => $"{AssetTypeFilterPrefsKeyPrefix}{Application.dataPath}";
         private static string LegacyAssetTypeFilterPrefsKey => $"{LegacyAssetTypeFilterPrefsKeyPrefix}{Application.dataPath}";
         private static string SortKeyPrefsKey => $"{SortKeyPrefsKeyPrefix}{Application.dataPath}";
         private static string SortOrderPrefsKey => $"{SortOrderPrefsKeyPrefix}{Application.dataPath}";
+        private static string AutoSaveBeforeOpenPrefsKey => $"{AutoSaveBeforeOpenPrefsKeyPrefix}{Application.dataPath}";
+        private static string AutoOpenGitClientAfterCommitPrefsKey => $"{AutoOpenGitClientAfterCommitPrefsKeyPrefix}{Application.dataPath}";
+        private static string GitClientPathPrefsKey => $"{GitClientPathPrefsKeyPrefix}{Application.dataPath}";
 
         private sealed class AssetRowRefs
         {
@@ -596,6 +618,11 @@ namespace TLNexus.GitU
                     return;
                 }
 
+                if (autoSaveBeforeOpen)
+                {
+                    TryAutoSaveBeforeOpen();
+                }
+
                 if (targetAssetPaths.Count == 0)
                 {
                     SetTargetAssets(GetTargetsFromCurrentSelection());
@@ -674,6 +701,85 @@ namespace TLNexus.GitU
             Repaint();
         }
 
+        private void TryAutoSaveBeforeOpen()
+        {
+            if (EditorApplication.isPlayingOrWillChangePlaymode)
+            {
+                return;
+            }
+
+            var assetsOk = true;
+            try
+            {
+                AssetDatabase.SaveAssets();
+            }
+            catch (Exception ex)
+            {
+                assetsOk = false;
+                Debug.LogWarning($"[GitU] Auto SaveAssets failed: {ex.Message}");
+            }
+
+            var scenesOk = true;
+            try
+            {
+                scenesOk = EditorSceneManager.SaveOpenScenes();
+            }
+            catch (Exception ex)
+            {
+                scenesOk = false;
+                Debug.LogWarning($"[GitU] Auto SaveOpenScenes failed: {ex.Message}");
+            }
+
+            var message = isChineseUi
+                ? $"已自动保存（Assets:{(assetsOk ? "OK" : "Fail")} / Scenes:{(scenesOk ? "OK" : "Fail")}）"
+                : $"Auto-saved (Assets:{(assetsOk ? "OK" : "Fail")} / Scenes:{(scenesOk ? "OK" : "Fail")})";
+
+            Debug.Log($"[GitU] {message}");
+            ShowTempNotification(message, 2.2f);
+        }
+
+        private bool TryOpenExternalGitClient(out string error)
+        {
+            error = null;
+
+            var path = gitClientPath ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                error = isChineseUi ? "未设置 Git 客户端路径。" : "Git client path is not set.";
+                return false;
+            }
+
+            if (!File.Exists(path))
+            {
+                error = isChineseUi ? "Git 客户端路径无效（文件不存在）。" : "Git client path is invalid (file not found).";
+                return false;
+            }
+
+            var workingDir = GitUtility.ProjectRoot;
+            if (string.IsNullOrEmpty(workingDir) || !Directory.Exists(workingDir))
+            {
+                workingDir = Application.dataPath;
+            }
+
+            try
+            {
+                var psi = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = path,
+                    WorkingDirectory = workingDir,
+                    UseShellExecute = true
+                };
+
+                System.Diagnostics.Process.Start(psi);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = (isChineseUi ? "打开 Git 客户端失败：" : "Failed to open Git client: ") + ex.Message;
+                return false;
+            }
+        }
+
         private void RequestAssetDatabaseRefreshAndRefreshData()
         {
             EditorApplication.delayCall += () =>
@@ -719,6 +825,10 @@ namespace TLNexus.GitU
             LoadStagedAllowList();
             LoadAssetTypeFilters();
             LoadSortSettings();
+            isChineseUi = EditorPrefs.GetInt(LanguagePrefKey, 1) != 0;
+            autoSaveBeforeOpen = EditorPrefs.GetBool(AutoSaveBeforeOpenPrefsKey, false);
+            autoOpenGitClientAfterCommit = EditorPrefs.GetBool(AutoOpenGitClientAfterCommitPrefsKey, false);
+            gitClientPath = EditorPrefs.GetString(GitClientPathPrefsKey, string.Empty);
             assetListViewsConfigured = false;
             lastUnstagedVisibleCount = -1;
             lastStagedVisibleCount = -1;
@@ -731,6 +841,7 @@ namespace TLNexus.GitU
             sortMenuOverlay = null;
             sortMenuPanel = null;
             sortMenuPositionRequestId = 0;
+            settingsOverlay = null;
 
             if (!BuildLayoutFromCode(root))
             {
@@ -738,6 +849,7 @@ namespace TLNexus.GitU
             }
 
             UpdateSortInfoLabel();
+            ApplyLanguageToUI();
 
             root.RegisterCallback<GeometryChangedEvent>(_ =>
             {
@@ -749,10 +861,10 @@ namespace TLNexus.GitU
 
             EnsureAssetListViewsConfigured();
             UpdateListEmptyHints();
+            EnsureSettingsOverlay();
 
             if (saveToDiskHintLabel != null)
             {
-                saveToDiskHintLabel.text = "重要提示：改材质/动画/Prefab/场景后，请先 Ctrl+S（或 Save Assets）写盘，再打开/刷新；否则可能漏显示。";
                 saveToDiskHintLabel.style.whiteSpace = WhiteSpace.Normal;
             }
 
@@ -814,9 +926,14 @@ namespace TLNexus.GitU
             {
                 historyButton.clicked += ToggleHistoryDropdown;
             }
+            if (settingsButton != null)
+            {
+                settingsButton.tooltip = isChineseUi ? "设置" : "Settings";
+                settingsButton.clicked += ToggleSettingsOverlay;
+            }
             if (repositoryStatusUpButton != null)
             {
-                repositoryStatusUpButton.tooltip = "排序";
+                repositoryStatusUpButton.tooltip = isChineseUi ? "排序" : "Sort";
                 repositoryStatusUpButton.clicked += ToggleSortMenu;
             }
             if (historyListView != null)
@@ -935,6 +1052,110 @@ namespace TLNexus.GitU
             historyDropdown.style.top = (hostHeight - desiredHeight) * 0.5f;
         }
 
+        private void EnsureSettingsOverlay()
+        {
+            if (settingsOverlay != null)
+            {
+                return;
+            }
+
+            var version = typeof(GitUWindow).Assembly.GetName().Version?.ToString();
+            if (string.IsNullOrWhiteSpace(version))
+            {
+                version = Application.unityVersion;
+            }
+
+            var initialChinese = EditorPrefs.GetInt(LanguagePrefKey, 1) != 0;
+            var initialAutoSaveBeforeOpen = EditorPrefs.GetBool(AutoSaveBeforeOpenPrefsKey, false);
+            var initialAutoOpenGitClientAfterCommit = EditorPrefs.GetBool(AutoOpenGitClientAfterCommitPrefsKey, false);
+            var initialGitClientPath = EditorPrefs.GetString(GitClientPathPrefsKey, string.Empty);
+
+            settingsOverlay = new GitUSettingsOverlay(
+                aboutVersion: "v1.5.0",
+                aboutAuthor: "T·L",
+                aboutAuthorLink: "https://jxaytl13.github.io",
+                aboutDocumentLink: null,
+                aboutDocumentLinkChinese: "https://my.feishu.cn/wiki/IngGwL2hviirYgkDkTzcpLR1n8e?from=from_copylink",
+                aboutDocumentLinkEnglish: "https://my.feishu.cn/wiki/UNSVw7dAZiHSaBkM3encs7ybnne?from=from_copylink",
+                toolIntroductionZh: "GitU 特色：\n- Unity 编辑器内的轻量 Git 提交面板，专注“变更 -> 待提交 -> 提交/推送”流程\n- 变更区 / 待提交区双列表，支持拖拽与批量选择，快速整理待提交内容\n- 提交信息支持多行（Enter 换行），提交记录可查看并复用\n- 保持纯 Git 工作流：提交就是标准 Git commit，可用任意 Git 客户端继续 pull/rebase/merge\n- “提交并推送”只执行 push（不自动拉取），避免在 Unity 内引入不可控的合并/冲突流程",
+                toolIntroductionEn: "GitU Highlights:\n- A lightweight in-Editor Git commit panel for Unity, focused on the “changes -> staged -> commit/push” flow\n- Dual lists (Unstaged / Staged) with drag & batch selection to curate staged content fast\n- Multi-line commit messages (Enter for new line); commit history can be viewed and reused\n- Pure Git workflow: commits are standard Git commits; continue work in any Git client (pull/rebase/merge)\n- “Commit & Push” only runs push (no auto pull) to avoid uncontrolled merges/conflicts inside Unity",
+                getConfigPath: () =>
+                {
+                    var commitHistoryPath = GetCommitHistoryFilePath();
+                    var allowListPath = GetStagedAllowListFilePath();
+                    return $"{commitHistoryPath}\n{allowListPath}";
+                },
+                initialChinese: initialChinese,
+                initialAutoSaveBeforeOpen: initialAutoSaveBeforeOpen,
+                initialAutoOpenGitClientAfterCommit: initialAutoOpenGitClientAfterCommit,
+                initialGitClientPath: initialGitClientPath,
+                onLanguageChanged: OnSettingsLanguageChanged,
+                onAutoSaveBeforeOpenChanged: OnAutoSaveBeforeOpenChanged,
+                onAutoOpenGitClientAfterCommitChanged: OnAutoOpenGitClientAfterCommitChanged,
+                onGitClientPathChanged: OnGitClientPathChanged);
+
+            rootVisualElement.Add(settingsOverlay.Root);
+        }
+
+        private void OnAutoSaveBeforeOpenChanged(bool enabled)
+        {
+            EditorPrefs.SetBool(AutoSaveBeforeOpenPrefsKey, enabled);
+            autoSaveBeforeOpen = enabled;
+        }
+
+        private void OnAutoOpenGitClientAfterCommitChanged(bool enabled)
+        {
+            EditorPrefs.SetBool(AutoOpenGitClientAfterCommitPrefsKey, enabled);
+            autoOpenGitClientAfterCommit = enabled;
+        }
+
+        private void OnGitClientPathChanged(string path)
+        {
+            path ??= string.Empty;
+            EditorPrefs.SetString(GitClientPathPrefsKey, path);
+            gitClientPath = path;
+        }
+
+        private void OnSettingsLanguageChanged(bool isChinese)
+        {
+            EditorPrefs.SetInt(LanguagePrefKey, isChinese ? 1 : 0);
+
+            if (isChineseUi == isChinese)
+            {
+                return;
+            }
+
+            isChineseUi = isChinese;
+            ApplyLanguageToUI();
+
+            if (sortMenuOverlay != null && sortMenuOverlay.resolvedStyle.display == DisplayStyle.Flex)
+            {
+                RebuildSortMenuContents();
+            }
+        }
+
+        private void ToggleSettingsOverlay()
+        {
+            if (settingsOverlay == null)
+            {
+                EnsureSettingsOverlay();
+            }
+
+            if (settingsOverlay == null)
+            {
+                return;
+            }
+
+            if (settingsOverlay.Root.resolvedStyle.display == DisplayStyle.Flex)
+            {
+                settingsOverlay.Hide();
+            }
+            else
+            {
+                settingsOverlay.Show();
+            }
+        }
+
         private void ConfigureSearchPlaceholder()
         {
             if (searchField == null)
@@ -952,7 +1173,7 @@ namespace TLNexus.GitU
 
             if (string.IsNullOrEmpty(searchQuery))
             {
-                searchField.SetValueWithoutNotify(SearchPlaceholderText);
+                searchField.SetValueWithoutNotify(isChineseUi ? SearchPlaceholderTextZh : SearchPlaceholderTextEn);
                 searchPlaceholderActive = true;
                 SetTextFieldTextColor(searchField, SearchFieldPlaceholderTextColor);
             }
@@ -989,7 +1210,7 @@ namespace TLNexus.GitU
             }
 
             searchPlaceholderActive = true;
-            searchField.SetValueWithoutNotify(SearchPlaceholderText);
+            searchField.SetValueWithoutNotify(isChineseUi ? SearchPlaceholderTextZh : SearchPlaceholderTextEn);
             SetTextFieldTextColor(searchField, SearchFieldPlaceholderTextColor);
         }
 
@@ -1011,7 +1232,7 @@ namespace TLNexus.GitU
 
             if (string.IsNullOrEmpty(commitMessage))
             {
-                commitMessageField.SetValueWithoutNotify(CommitMessagePlaceholderText);
+                commitMessageField.SetValueWithoutNotify(isChineseUi ? CommitMessagePlaceholderTextZh : CommitMessagePlaceholderTextEn);
                 commitMessagePlaceholderActive = true;
                 SetTextFieldTextColor(commitMessageField, CommitFieldPlaceholderTextColor);
             }
@@ -1051,7 +1272,7 @@ namespace TLNexus.GitU
 
             commitMessage = string.Empty;
             commitMessagePlaceholderActive = true;
-            commitMessageField.SetValueWithoutNotify(CommitMessagePlaceholderText);
+            commitMessageField.SetValueWithoutNotify(isChineseUi ? CommitMessagePlaceholderTextZh : CommitMessagePlaceholderTextEn);
             SetTextFieldTextColor(commitMessageField, CommitFieldPlaceholderTextColor);
             UpdateCommitButtonsEnabled();
         }
@@ -1224,7 +1445,29 @@ namespace TLNexus.GitU
 
             if (completedKind == GitOperationKind.Commit || completedKind == GitOperationKind.CommitAndPush)
             {
-                EditorUtility.DisplayDialog("提交", string.IsNullOrEmpty(result.Summary) ? "操作完成。" : result.Summary, "确定");
+                var dialogTitle = isChineseUi ? "提交" : "Commit";
+                var dialogOk = isChineseUi ? "确定" : "OK";
+                var dialogCancel = isChineseUi ? "取消" : "Cancel";
+                var dialogSummary = string.IsNullOrEmpty(result.Summary)
+                    ? (isChineseUi ? "操作完成。" : "Done.")
+                    : result.Summary;
+
+                if (result.CommitSucceeded && autoOpenGitClientAfterCommit)
+                {
+                    var dialogMessage = dialogSummary + "\n\n" + (isChineseUi ? "点击“确定”打开 Git 客户端。" : "Click OK to open the Git client.");
+                    var confirmedOpen = EditorUtility.DisplayDialog(dialogTitle, dialogMessage, dialogOk, dialogCancel);
+                    if (confirmedOpen)
+                    {
+                        if (!TryOpenExternalGitClient(out var error))
+                        {
+                            EditorUtility.DisplayDialog(dialogTitle, error ?? (isChineseUi ? "打开 Git 客户端失败。" : "Failed to open Git client."), dialogOk);
+                        }
+                    }
+                }
+                else
+                {
+                    EditorUtility.DisplayDialog(dialogTitle, dialogSummary, dialogOk);
+                }
 
                 if (result.CommitSucceeded)
                 {
@@ -1297,10 +1540,14 @@ namespace TLNexus.GitU
             deletedButton = root.Q<Button>("deletedButton");
             assetTypeMenu = root.Q<ToolbarMenu>("assetTypeMenu");
             searchField = root.Q<TextField>("searchField");
+            unstagedTitleLabel = root.Q<Label>("unstagedTitleLabel");
             unstagedHeaderLabel = root.Q<Label>("unstagedHeaderLabel");
+            stagedTitleLabel = root.Q<Label>("stagedTitleLabel");
             stagedHeaderLabel = root.Q<Label>("stagedHeaderLabel");
             unstagedScrollView = root.Q<ListView>("unstagedScrollView");
             stagedScrollView = root.Q<ListView>("stagedScrollView");
+            commitMessageTitleLabel = root.Q<Label>("commitMessageTitleLabel");
+            commitMessageHintLabel = root.Q<Label>("commitMessageHintLabel");
             commitMessageField = root.Q<TextField>("commitMessageField");
             commitButton = root.Q<Button>("commitButton");
             commitAndPushButton = root.Q<Button>("commitAndPushButton");
@@ -1308,8 +1555,11 @@ namespace TLNexus.GitU
             refreshButton = root.Q<Button>("refreshButton");
             repositoryStatusUpButton = root.Q<Button>("repositoryStatusUpButton");
             sortInfoLabel = root.Q<Label>("sortInfoLabel");
+            settingsButton = root.Q<Button>("Setting");
             historyDropdown = root.Q<VisualElement>("historyDropdown");
             historyListView = root.Q<ListView>("historyListView");
+            historyTitleLabel = root.Q<Label>("historyTitleLabel");
+            historyHintLabel = root.Q<Label>("historyHintLabel");
             repositoryStatusLabel = root.Q<Label>("repositoryStatusLabel");
             leftColumn = root.Q<VisualElement>("leftColumn");
             toastLabel = root.Q<Label>("toastLabel");
@@ -1317,6 +1567,8 @@ namespace TLNexus.GitU
             stagedListContainer = root.Q<VisualElement>("stagedListContainer");
             unstagedEmptyHintOverlay = root.Q<VisualElement>("unstagedEmptyHintOverlay");
             stagedEmptyHintOverlay = root.Q<VisualElement>("stagedEmptyHintOverlay");
+            unstagedEmptyHintLabel = root.Q<Label>("unstagedEmptyHintLabel");
+            stagedEmptyHintLabel = root.Q<Label>("stagedEmptyHintLabel");
         }
 
         private void LoadSortSettings()
@@ -1361,36 +1613,97 @@ namespace TLNexus.GitU
             sortInfoLabel.text = $"{GetSortKeyLabel(assetSortKey)}｜{GetSortOrderLabel(assetSortOrder)}";
         }
 
-        private static string GetSortKeyLabel(AssetSortKey key)
+        private string GetSortKeyLabel(AssetSortKey key)
         {
             switch (key)
             {
                 case AssetSortKey.GitStatus:
-                    return "Git 状态";
+                    return isChineseUi ? "Git 状态" : "Git Status";
                 case AssetSortKey.AssetType:
-                    return "资源类型";
+                    return isChineseUi ? "资源类型" : "Type";
                 case AssetSortKey.Name:
-                    return "名称";
+                    return isChineseUi ? "名称" : "Name";
                 case AssetSortKey.Time:
-                    return "时间";
+                    return isChineseUi ? "时间" : "Time";
                 case AssetSortKey.Path:
-                    return "路径";
+                    return isChineseUi ? "路径" : "Path";
                 default:
-                    return "路径";
+                    return isChineseUi ? "路径" : "Path";
             }
         }
 
-        private static string GetSortOrderLabel(SortOrder order)
+        private string GetSortOrderLabel(SortOrder order)
         {
             switch (order)
             {
                 case SortOrder.Ascending:
-                    return "升序";
+                    return isChineseUi ? "升序" : "Ascending";
                 case SortOrder.Descending:
-                    return "降序";
+                    return isChineseUi ? "降序" : "Descending";
                 default:
-                    return "升序";
+                    return isChineseUi ? "升序" : "Ascending";
             }
+        }
+
+        private void ApplyLanguageToUI()
+        {
+            if (addedButton != null) addedButton.text = isChineseUi ? "新增 (A)" : "Added (A)";
+            if (modifiedButton != null) modifiedButton.text = isChineseUi ? "修改 (M)" : "Modified (M)";
+            if (deletedButton != null) deletedButton.text = isChineseUi ? "删除 (D)" : "Deleted (D)";
+
+            if (refreshButton != null) refreshButton.text = isChineseUi ? "刷新" : "Refresh";
+            if (historyButton != null) historyButton.text = isChineseUi ? "记录" : "History";
+            if (commitButton != null) commitButton.text = isChineseUi ? "提交到本地" : "Commit";
+            if (commitAndPushButton != null) commitAndPushButton.text = isChineseUi ? "提交并推送" : "Commit & Push";
+
+            if (unstagedTitleLabel != null) unstagedTitleLabel.text = isChineseUi ? "变更区" : "UNSTAGED CHANGES";
+            if (stagedTitleLabel != null) stagedTitleLabel.text = isChineseUi ? "待提交" : "STAGED CHANGES";
+
+            if (commitMessageTitleLabel != null) commitMessageTitleLabel.text = isChineseUi ? "提交信息" : "Commit Message";
+            if (commitMessageHintLabel != null) commitMessageHintLabel.text = isChineseUi ? "按Enter可换行" : "Enter to add a new line";
+
+            if (historyTitleLabel != null) historyTitleLabel.text = isChineseUi ? "提交记录" : "Commit History";
+            if (historyHintLabel != null) historyHintLabel.text = isChineseUi ? "提示：最多显示前100条记录" : "Hint: up to 100 entries";
+
+            if (settingsButton != null) settingsButton.tooltip = isChineseUi ? "设置" : "Settings";
+            if (repositoryStatusUpButton != null) repositoryStatusUpButton.tooltip = isChineseUi ? "排序" : "Sort";
+            if (searchField != null) searchField.tooltip = isChineseUi ? SearchTooltipZh : SearchTooltipEn;
+
+            if (saveToDiskHintLabel != null)
+            {
+                saveToDiskHintLabel.text = isChineseUi ? SaveToDiskHintZh : SaveToDiskHintEn;
+            }
+
+            if (unstagedHeaderLabel != null) unstagedHeaderLabel.text = GetUnstagedHeaderText(visibleUnstagedItems.Count);
+            if (stagedHeaderLabel != null) stagedHeaderLabel.text = GetStagedHeaderText(visibleStagedItems.Count);
+
+            if (unstagedEmptyHintLabel != null)
+            {
+                unstagedEmptyHintLabel.text = isChineseUi
+                    ? "暂无变更\n\n提示：\n拖拽条目到“待提交”可加入待提交\nCtrl：多选\nShift：连续选择\nCtrl+A：全选"
+                    : "No changes.\n\nTips:\nDrag items to “Staged” to include them\nCtrl: multi-select\nShift: range select\nCtrl+A: select all";
+            }
+
+            if (stagedEmptyHintLabel != null)
+            {
+                stagedEmptyHintLabel.text = isChineseUi
+                    ? "暂无待提交条目\n\n提示：\n拖拽条目到“变更区”可取消待提交\nCtrl：多选\nShift：连续选择\nCtrl+A：全选"
+                    : "No staged items.\n\nTips:\nDrag items to “Unstaged” to unstage\nCtrl: multi-select\nShift: range select\nCtrl+A: select all";
+            }
+
+            UpdateSortInfoLabel();
+            ConfigureSearchPlaceholder();
+            ConfigureCommitMessagePlaceholder();
+        }
+
+        private string GetUnstagedHeaderText(int count)
+        {
+            return isChineseUi ? $"工作区变更（未暂存）：{count} 项" : $"Unstaged changes: {count} items";
+        }
+
+        private string GetStagedHeaderText(int count)
+        {
+            return isChineseUi ? $"待提交（已暂存）：{count} 项" : $"Staged changes: {count} items";
         }
 
         private void ToggleSortMenu()
@@ -1607,35 +1920,35 @@ namespace TLNexus.GitU
 
             sortMenuPanel.Clear();
 
-            sortMenuPanel.Add(CreateSortMenuItem("Git 状态", assetSortKey == AssetSortKey.GitStatus, () =>
+            sortMenuPanel.Add(CreateSortMenuItem(GetSortKeyLabel(AssetSortKey.GitStatus), assetSortKey == AssetSortKey.GitStatus, () =>
             {
                 assetSortKey = AssetSortKey.GitStatus;
                 SaveSortSettings();
                 HideSortMenu();
                 RefreshListViews();
             }));
-            sortMenuPanel.Add(CreateSortMenuItem("资源类型", assetSortKey == AssetSortKey.AssetType, () =>
+            sortMenuPanel.Add(CreateSortMenuItem(GetSortKeyLabel(AssetSortKey.AssetType), assetSortKey == AssetSortKey.AssetType, () =>
             {
                 assetSortKey = AssetSortKey.AssetType;
                 SaveSortSettings();
                 HideSortMenu();
                 RefreshListViews();
             }));
-            sortMenuPanel.Add(CreateSortMenuItem("名称", assetSortKey == AssetSortKey.Name, () =>
+            sortMenuPanel.Add(CreateSortMenuItem(GetSortKeyLabel(AssetSortKey.Name), assetSortKey == AssetSortKey.Name, () =>
             {
                 assetSortKey = AssetSortKey.Name;
                 SaveSortSettings();
                 HideSortMenu();
                 RefreshListViews();
             }));
-            sortMenuPanel.Add(CreateSortMenuItem("时间", assetSortKey == AssetSortKey.Time, () =>
+            sortMenuPanel.Add(CreateSortMenuItem(GetSortKeyLabel(AssetSortKey.Time), assetSortKey == AssetSortKey.Time, () =>
             {
                 assetSortKey = AssetSortKey.Time;
                 SaveSortSettings();
                 HideSortMenu();
                 RefreshListViews();
             }));
-            sortMenuPanel.Add(CreateSortMenuItem("路径", assetSortKey == AssetSortKey.Path, () =>
+            sortMenuPanel.Add(CreateSortMenuItem(GetSortKeyLabel(AssetSortKey.Path), assetSortKey == AssetSortKey.Path, () =>
             {
                 assetSortKey = AssetSortKey.Path;
                 SaveSortSettings();
@@ -1645,14 +1958,14 @@ namespace TLNexus.GitU
 
             sortMenuPanel.Add(CreateSortMenuSeparator());
 
-            sortMenuPanel.Add(CreateSortMenuItem("升序", assetSortOrder == SortOrder.Ascending, () =>
+            sortMenuPanel.Add(CreateSortMenuItem(GetSortOrderLabel(SortOrder.Ascending), assetSortOrder == SortOrder.Ascending, () =>
             {
                 assetSortOrder = SortOrder.Ascending;
                 SaveSortSettings();
                 HideSortMenu();
                 RefreshListViews();
             }));
-            sortMenuPanel.Add(CreateSortMenuItem("降序", assetSortOrder == SortOrder.Descending, () =>
+            sortMenuPanel.Add(CreateSortMenuItem(GetSortOrderLabel(SortOrder.Descending), assetSortOrder == SortOrder.Descending, () =>
             {
                 assetSortOrder = SortOrder.Descending;
                 SaveSortSettings();
@@ -2052,12 +2365,12 @@ namespace TLNexus.GitU
 
             if (unstagedHeaderLabel != null)
             {
-                unstagedHeaderLabel.text = $"\u5de5\u4f5c\u533a\u53d8\u66f4\uff08\u672a\u6682\u5b58\uff09\uff1a{visibleUnstagedItems.Count} \u9879";
+                unstagedHeaderLabel.text = GetUnstagedHeaderText(visibleUnstagedItems.Count);
             }
 
             if (stagedHeaderLabel != null)
             {
-                stagedHeaderLabel.text = $"\u5f85\u63d0\u4ea4\uff08\u5df2\u6682\u5b58\uff09\uff1a{visibleStagedItems.Count} \u9879";
+                stagedHeaderLabel.text = GetStagedHeaderText(visibleStagedItems.Count);
             }
 
             if (touchedUnstaged)
@@ -3584,9 +3897,10 @@ namespace TLNexus.GitU
             UpdateHeaderLabels();
             ForceRepaintUI();
 
+            var isChinese = isChineseUi;
             gitOperationTask = Task.Run(() =>
             {
-                if (!GitUtility.CommitGit(gitRoot, normalizedMessage, out var commitSummary))
+                if (!GitUtility.CommitGit(gitRoot, normalizedMessage, isChinese, out var commitSummary))
                 {
                     return new GitOperationResult(false, commitSummary, false, null);
                 }
@@ -3594,13 +3908,15 @@ namespace TLNexus.GitU
                 var finalSummary = commitSummary;
                 if (pushAfter)
                 {
-                    if (GitUtility.PushGit(gitRoot, out var pushSummary))
+                    if (GitUtility.PushGit(gitRoot, isChinese, out var pushSummary))
                     {
                         finalSummary = commitSummary + "\\n" + pushSummary;
                     }
                     else
                     {
-                        var pushFailMessage = "\\n推送失败：远程可能已有新的提交，请在 UGit 中先拉取更新并解决冲突后再推送。";
+                        var pushFailMessage = isChinese
+                            ? "\\n推送失败：远程可能已有新的提交，请在 Git 客户端中先拉取更新并解决冲突后再推送。"
+                            : "\\nPush failed: Remote may have new commits. Please pull updates and resolve conflicts in your Git client before pushing again.";
                         var extraInfo = string.IsNullOrEmpty(pushSummary) ? string.Empty : "\\n" + pushSummary;
                         finalSummary = commitSummary + pushFailMessage + extraInfo;
                     }
@@ -3698,12 +4014,12 @@ namespace TLNexus.GitU
 
             if (unstagedHeaderLabel != null)
             {
-                unstagedHeaderLabel.text = $"\u5de5\u4f5c\u533a\u53d8\u66f4\uff08\u672a\u6682\u5b58\uff09\uff1a{unstaged.Count} \u9879";
+                unstagedHeaderLabel.text = GetUnstagedHeaderText(unstaged.Count);
             }
 
             if (stagedHeaderLabel != null)
             {
-                stagedHeaderLabel.text = $"\u5f85\u63d0\u4ea4\uff08\u5df2\u6682\u5b58\uff09\uff1a{staged.Count} \u9879";
+                stagedHeaderLabel.text = GetStagedHeaderText(staged.Count);
             }
 
             visibleUnstagedItems.Clear();
@@ -4663,7 +4979,7 @@ namespace TLNexus.GitU
                 info.ChangeType == GitChangeType.Modified || info.ChangeType == GitChangeType.Renamed);
             var deletedCount = assetInfos.Count(info => info.ChangeType == GitChangeType.Deleted);
 
-            var statusText = string.Format(GitStatusFormat, stagedCount, unstagedCount);
+            var statusText = string.Format(isChineseUi ? GitStatusFormatZh : GitStatusFormatEn, stagedCount, unstagedCount);
             var addedText = string.Format(AddedSegmentFormat, AddedColorHex, addedCount);
             var modifiedText = string.Format(ModifiedSegmentFormat, ModifiedColorHex, modifiedCount);
             var deletedText = string.Format(DeletedSegmentFormat, DeletedColorHex, deletedCount);

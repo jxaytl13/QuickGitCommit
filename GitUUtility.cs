@@ -897,13 +897,13 @@ namespace TLNexus.GitU
             }
         }
 
-        internal static bool CommitGit(string gitRoot, string message, out string summary)
+        internal static bool CommitGit(string gitRoot, string message, bool isChinese, out string summary)
         {
             summary = string.Empty;
 
             if (string.IsNullOrWhiteSpace(message))
             {
-                summary = "提交说明不能为空。";
+                summary = isChinese ? "提交说明不能为空。" : "Commit message cannot be empty.";
                 return false;
             }
 
@@ -912,15 +912,16 @@ namespace TLNexus.GitU
 
             if (!TryRunGitCommandNoLog(gitRoot, "diff --cached --name-only", GitCommandTimeoutShortMs, out var diffOutput, out var diffError))
             {
+                var baseMsg = isChinese ? "无法检查待提交内容，请确认仓库状态。" : "Unable to check staged content. Please verify repository status.";
                 summary = string.IsNullOrEmpty(diffError)
-                    ? "无法检查待提交内容，请确认仓库状态。"
-                    : $"无法检查待提交内容，请确认仓库状态。\n{diffError.Trim()}";
+                    ? baseMsg
+                    : $"{baseMsg}\n{diffError.Trim()}";
                 return false;
             }
 
             if (string.IsNullOrWhiteSpace(diffOutput))
             {
-                summary = "当前没有已暂存的变更可提交。";
+                summary = isChinese ? "当前没有已暂存的变更可提交。" : "No staged changes to commit.";
                 return false;
             }
 
@@ -942,9 +943,10 @@ namespace TLNexus.GitU
 
                 if (!TryRunGitCommandNoLog(gitRoot, commitArgs, GitCommandTimeoutMediumMs, out _, out var commitError))
                 {
+                    var failMsg = isChinese ? "提交失败，请查看 Console 日志中的 Git 输出。" : "Commit failed. Please check the Git output in the Console.";
                     summary = string.IsNullOrEmpty(commitError)
-                        ? "提交失败，请查看 Console 日志中的 Git 输出。"
-                        : $"提交失败：{commitError.Trim()}";
+                        ? failMsg
+                        : (isChinese ? $"提交失败：{commitError.Trim()}" : $"Commit failed: {commitError.Trim()}");
                     return false;
                 }
             }
@@ -966,23 +968,23 @@ namespace TLNexus.GitU
                 }
             }
 
-            summary = "提交成功。";
+            summary = isChinese ? "提交成功。" : "Commit successful.";
             return true;
         }
 
-        internal static bool PushGit(string gitRoot, out string summary)
+        internal static bool PushGit(string gitRoot, bool isChinese, out string summary)
         {
             summary = string.Empty;
 
             if (!TryRunGitCommandNoLog(gitRoot, "push", GitCommandTimeoutLongMs, out _, out var pushError))
             {
                 summary = string.IsNullOrEmpty(pushError)
-                    ? "推送失败，请查看 Console 日志中的 Git 输出。"
+                    ? (isChinese ? "推送失败，请查看 Console 日志中的 Git 输出。" : "Push failed. Please check the Git output in the Console.")
                     : pushError.Trim();
                 return false;
             }
 
-            summary = "推送成功。";
+            summary = isChinese ? "推送成功。" : "Push successful.";
             return true;
         }
 
@@ -1708,13 +1710,13 @@ namespace TLNexus.GitU
             return succeeded > 0;
         }
 
-        internal static bool Commit(string message, out string summary)
+        internal static bool Commit(string message, bool isChinese, out string summary)
         {
             summary = string.Empty;
 
             if (string.IsNullOrWhiteSpace(message))
             {
-                summary = "提交说明不能为空。";
+                summary = isChinese ? "提交说明不能为空。" : "Commit message cannot be empty.";
                 return false;
             }
 
@@ -1723,13 +1725,13 @@ namespace TLNexus.GitU
 
             if (!TryRunGitCommand($"diff --cached --name-only", out var diffOutput))
             {
-                summary = "无法检查待提交内容，请确认仓库状态。";
+                summary = isChinese ? "无法检查待提交内容，请确认仓库状态。" : "Unable to check staged content. Please verify repository status.";
                 return false;
             }
 
             if (string.IsNullOrWhiteSpace(diffOutput))
             {
-                summary = "当前没有已暂存的变更可提交。";
+                summary = isChinese ? "当前没有已暂存的变更可提交。" : "No staged changes to commit.";
                 return false;
             }
 
@@ -1751,7 +1753,7 @@ namespace TLNexus.GitU
 
                 if (!TryRunGitCommand(commitArgs, out var output, GitCommandTimeoutMediumMs))
                 {
-                    summary = "提交失败，请查看 Console 日志中的 Git 输出。";
+                    summary = isChinese ? "提交失败，请查看 Console 日志中的 Git 输出。" : "Commit failed. Please check the Git output in the Console.";
                     return false;
                 }
             }
@@ -1773,21 +1775,21 @@ namespace TLNexus.GitU
                 }
             }
 
-            summary = "提交成功。";
+            summary = isChinese ? "提交成功。" : "Commit successful.";
             return true;
         }
 
-        internal static bool Push(out string summary)
+        internal static bool Push(bool isChinese, out string summary)
         {
             summary = string.Empty;
 
             if (!TryRunGitCommand("push", out var output, GitCommandTimeoutLongMs))
             {
-                summary = "推送失败，请查看 Console 日志中的 Git 输出。";
+                summary = isChinese ? "推送失败，请查看 Console 日志中的 Git 输出。" : "Push failed. Please check the Git output in the Console.";
                 return false;
             }
 
-            summary = "推送成功。";
+            summary = isChinese ? "推送成功。" : "Push successful.";
             return true;
         }
 

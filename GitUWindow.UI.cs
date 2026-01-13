@@ -146,7 +146,7 @@ namespace TLNexus.GitU
                     input.style.borderRightWidth = 1;
                     input.style.borderBottomWidth = 1;
                     input.style.borderLeftWidth = 1;
-                    var c = Rgb(139, 92, 246);
+                    var c = Rgb(57, 209, 157);
                     input.style.borderTopColor = c;
                     input.style.borderRightColor = c;
                     input.style.borderBottomColor = c;
@@ -228,7 +228,7 @@ namespace TLNexus.GitU
                     input.style.borderRightWidth = 1;
                     input.style.borderBottomWidth = 1;
                     input.style.borderLeftWidth = 1;
-                    var c = Rgb(139, 92, 246);
+                    var c = Rgb(57, 209, 157);
                     input.style.borderTopColor = c;
                     input.style.borderRightColor = c;
                     input.style.borderBottomColor = c;
@@ -250,6 +250,26 @@ namespace TLNexus.GitU
             SetFocusedBorder(false);
             field.RegisterCallback<FocusInEvent>(_ => SetFocusedBorder(true));
             field.RegisterCallback<FocusOutEvent>(_ => SetFocusedBorder(false));
+        }
+
+        private static void ApplyTargetFieldInternals(ObjectField field)
+        {
+            if (field == null)
+            {
+                return;
+            }
+
+            void ApplyInternalStyles()
+            {
+                var label = field.Q<Label>(className: "unity-base-field__label");
+                if (label != null)
+                {
+                    label.style.display = DisplayStyle.None;
+                }
+            }
+
+            field.RegisterCallback<AttachToPanelEvent>(_ => ApplyInternalStyles());
+            field.RegisterCallback<GeometryChangedEvent>(_ => ApplyInternalStyles());
         }
 
         private bool BuildLayoutFromCode(VisualElement root)
@@ -315,7 +335,7 @@ namespace TLNexus.GitU
                 targetRow.style.marginLeft = 10;
                 headerCard.Add(targetRow);
 
-                var targetFieldElement = new ObjectField { name = "targetField", label = "目标资源" };
+                var targetFieldElement = new ObjectField { name = "targetField", label = string.Empty };
                 targetFieldElement.AddToClassList("target-field");
                 targetFieldElement.style.flexGrow = 0;
                 targetFieldElement.style.flexShrink = 1;
@@ -394,7 +414,7 @@ namespace TLNexus.GitU
                     button.style.borderBottomRightRadius = 4;
                     button.style.borderBottomLeftRadius = 4;
                     button.style.height = 22;
-                    button.style.width = 70;
+                    button.style.width = 96;
                     return button;
                 }
 
@@ -556,7 +576,7 @@ namespace TLNexus.GitU
                 unstagedHeaderRow.style.paddingTop = 8;
                 leftColumnElement.Add(unstagedHeaderRow);
 
-                var unstagedTitle = new Label("UNSTAGED CHANGES");
+                var unstagedTitle = new Label("UNSTAGED CHANGES") { name = "unstagedTitleLabel" };
                 unstagedTitle.AddToClassList("panel-title");
                 ApplyPanelTitleBaseStyle(unstagedTitle);
                 unstagedTitle.style.unityTextAlign = TextAnchor.MiddleLeft;
@@ -697,7 +717,7 @@ namespace TLNexus.GitU
                 stagedHeaderRow.style.paddingTop = 8;
                 rightColumnElement.Add(stagedHeaderRow);
 
-                var stagedTitle = new Label("STAGED CHANGES");
+                var stagedTitle = new Label("STAGED CHANGES") { name = "stagedTitleLabel" };
                 stagedTitle.AddToClassList("panel-title");
                 ApplyPanelTitleBaseStyle(stagedTitle);
                 stagedTitle.style.unityTextAlign = TextAnchor.MiddleLeft;
@@ -940,7 +960,7 @@ namespace TLNexus.GitU
                 commitHeaderRow.style.marginBottom = 6;
                 commitBox.Add(commitHeaderRow);
 
-                var commitMessageTitleLabelElement = new Label("Commit Message");
+                var commitMessageTitleLabelElement = new Label("Commit Message") { name = "commitMessageTitleLabel" };
                 commitMessageTitleLabelElement.AddToClassList("commit-message-title");
                 commitMessageTitleLabelElement.style.fontSize = 11;
                 commitMessageTitleLabelElement.style.unityFontStyleAndWeight = FontStyle.Bold;
@@ -1024,8 +1044,9 @@ namespace TLNexus.GitU
                 commitButtonElement.AddToClassList("commit-button-local");
                 commitButtonElement.style.width = 140;
                 commitButtonElement.style.height = 28;
-                commitButtonElement.style.backgroundColor = Rgba(59, 130, 246, 0.9f);
-                commitButtonElement.style.color = Color.white;
+                var accentColor = new Color(57f / 255f, 209f / 255f, 157f / 255f, 1f);
+                commitButtonElement.style.backgroundColor = new Color(accentColor.r, accentColor.g, accentColor.b, 0.2f);
+                commitButtonElement.style.color = accentColor;
                 commitButtonElement.style.unityFontStyleAndWeight = FontStyle.Bold;
                 commitButtonElement.style.marginLeft = 4;
                 commitButtonElement.style.marginRight = 4;
@@ -1033,14 +1054,32 @@ namespace TLNexus.GitU
                 commitButtonElement.style.borderTopRightRadius = 6;
                 commitButtonElement.style.borderBottomRightRadius = 6;
                 commitButtonElement.style.borderBottomLeftRadius = 6;
+                commitButtonElement.style.borderTopWidth = 1;
+                commitButtonElement.style.borderRightWidth = 1;
+                commitButtonElement.style.borderBottomWidth = 1;
+                commitButtonElement.style.borderLeftWidth = 1;
+                commitButtonElement.style.borderTopColor = accentColor;
+                commitButtonElement.style.borderRightColor = accentColor;
+                commitButtonElement.style.borderBottomColor = accentColor;
+                commitButtonElement.style.borderLeftColor = accentColor;
+                commitButtonElement.RegisterCallback<MouseEnterEvent>(_ =>
+                {
+                    commitButtonElement.style.backgroundColor = accentColor;
+                    commitButtonElement.style.color = Color.white;
+                });
+                commitButtonElement.RegisterCallback<MouseLeaveEvent>(_ =>
+                {
+                    commitButtonElement.style.backgroundColor = new Color(accentColor.r, accentColor.g, accentColor.b, 0.2f);
+                    commitButtonElement.style.color = accentColor;
+                });
                 commitSpacer.Add(commitButtonElement);
 
                 var commitAndPushButtonElement = new Button { name = "commitAndPushButton", text = "提交并推送" };
                 commitAndPushButtonElement.AddToClassList("commit-button-push");
                 commitAndPushButtonElement.style.width = 140;
                 commitAndPushButtonElement.style.height = 28;
-                commitAndPushButtonElement.style.backgroundColor = Rgba(139, 92, 246, 0.9f);
-                commitAndPushButtonElement.style.color = Color.white;
+                commitAndPushButtonElement.style.backgroundColor = accentColor;
+                commitAndPushButtonElement.style.color = new Color(0.1f, 0.1f, 0.1f, 1f);
                 commitAndPushButtonElement.style.unityFontStyleAndWeight = FontStyle.Bold;
                 commitAndPushButtonElement.style.marginRight = 0;
                 commitAndPushButtonElement.style.marginLeft = 4;
@@ -1048,6 +1087,14 @@ namespace TLNexus.GitU
                 commitAndPushButtonElement.style.borderTopRightRadius = 6;
                 commitAndPushButtonElement.style.borderBottomRightRadius = 6;
                 commitAndPushButtonElement.style.borderBottomLeftRadius = 6;
+                commitAndPushButtonElement.RegisterCallback<MouseEnterEvent>(_ =>
+                {
+                    commitAndPushButtonElement.style.backgroundColor = new Color(accentColor.r * 0.85f, accentColor.g * 0.85f, accentColor.b * 0.85f, 1f);
+                });
+                commitAndPushButtonElement.RegisterCallback<MouseLeaveEvent>(_ =>
+                {
+                    commitAndPushButtonElement.style.backgroundColor = accentColor;
+                });
                 commitSpacer.Add(commitAndPushButtonElement);
 
                 var historyDropdownElement = new VisualElement { name = "historyDropdown" };
@@ -1099,7 +1146,7 @@ namespace TLNexus.GitU
                 historyHeaderBarElement.style.borderBottomColor = dropdownBorder;
                 historyDropdownElement.Add(historyHeaderBarElement);
 
-                var historyTitleLabelElement = new Label("提交记录");
+                var historyTitleLabelElement = new Label("提交记录") { name = "historyTitleLabel" };
                 historyTitleLabelElement.AddToClassList("history-title");
                 historyTitleLabelElement.style.fontSize = 11;
                 historyTitleLabelElement.style.unityFontStyleAndWeight = FontStyle.Bold;
@@ -1224,6 +1271,7 @@ namespace TLNexus.GitU
 
                 ApplySearchFieldInternals(searchFieldElement);
                 ApplyCommitFieldInternals(commitMessageFieldElement);
+                ApplyTargetFieldInternals(targetFieldElement);
                 CacheUIElements(root);
                 return true;
             }
