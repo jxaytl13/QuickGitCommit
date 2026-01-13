@@ -342,6 +342,15 @@ namespace TLNexus.GitU
                 targetFieldElement.style.borderBottomLeftRadius = 0;
                 targetRow.Add(targetFieldElement);
 
+                // 多选时显示的文本标签，默认隐藏
+                var multiSelectLabel = new Label { name = "multiSelectLabel", text = "" };
+                multiSelectLabel.style.display = DisplayStyle.None;
+                multiSelectLabel.style.marginLeft = 4;
+                multiSelectLabel.style.marginRight = 4;
+                multiSelectLabel.style.color = new Color(1f, 1f, 1f, 0.7f);
+                multiSelectLabel.style.unityTextAlign = TextAnchor.MiddleLeft;
+                targetRow.Add(multiSelectLabel);
+
                 var refreshButtonElement = new Button { name = "refreshButton", text = "刷新" };
                 refreshButtonElement.AddToClassList("primary-button");
                 refreshButtonElement.AddToClassList("refresh-button");
@@ -424,6 +433,39 @@ namespace TLNexus.GitU
                     button.style.borderBottomLeftRadius = 4;
                     button.style.height = 22;
                     button.style.width = 96;
+
+                    // 存储按钮的原始颜色，用于悬停后恢复
+                    button.userData = color;
+
+                    // 悬停效果：激活状态用白色边框，未激活状态用强调色边框
+                    var accentColor = Rgb(57, 209, 157);
+                    button.RegisterCallback<MouseEnterEvent>(_ =>
+                    {
+                        var bg = button.style.backgroundColor.value;
+                        var isEnabled = bg.a > 0.08f;
+                        var hoverBorder = isEnabled ? Color.white : accentColor;
+                        button.style.borderTopColor = hoverBorder;
+                        button.style.borderRightColor = hoverBorder;
+                        button.style.borderBottomColor = hoverBorder;
+                        button.style.borderLeftColor = hoverBorder;
+                    });
+                    button.RegisterCallback<MouseLeaveEvent>(_ =>
+                    {
+                        // 从 userData 获取原始颜色，根据背景透明度判断激活状态
+                        if (button.userData is Color originalColor)
+                        {
+                            var bg = button.style.backgroundColor.value;
+                            var isEnabled = bg.a > 0.08f;
+                            var restoreBorder = isEnabled
+                                ? new Color(originalColor.r, originalColor.g, originalColor.b, 0.75f)
+                                : Rgba(255, 255, 255, 0.12f);
+                            button.style.borderTopColor = restoreBorder;
+                            button.style.borderRightColor = restoreBorder;
+                            button.style.borderBottomColor = restoreBorder;
+                            button.style.borderLeftColor = restoreBorder;
+                        }
+                    });
+
                     return button;
                 }
 

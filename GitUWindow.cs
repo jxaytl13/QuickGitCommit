@@ -115,6 +115,7 @@ namespace TLNexus.GitU
         private HashSet<string> initialStagedPaths;
         private bool hasShownPreexistingStagedHint;
         private bool hasAutoStagedModifiedFiles;
+        private bool skipRefreshUiDuringAutoStage;
         private readonly HashSet<string> stagedAllowList = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private bool autoCleanExternalStagedOnOpen;
         private bool hasAutoCleanedExternalStagedOnOpen;
@@ -168,6 +169,7 @@ namespace TLNexus.GitU
 
         // UI Toolkit elements
         private ObjectField targetField;
+        private Label multiSelectLabel;
         private Label pathLabel;
         private Label statusLabel;
         private Label saveToDiskHintLabel;
@@ -1533,6 +1535,7 @@ namespace TLNexus.GitU
         private void CacheUIElements(VisualElement root)
         {
             targetField = root.Q<ObjectField>("targetField");
+            multiSelectLabel = root.Q<Label>("multiSelectLabel");
             pathLabel = root.Q<Label>("pathLabel");
             statusLabel = root.Q<Label>("statusLabel");
             saveToDiskHintLabel = root.Q<Label>("saveToDiskHintLabel");
@@ -3114,10 +3117,14 @@ namespace TLNexus.GitU
             _ = GitUtility.UnityProjectFolder;
             refreshInfoMessages = infoMessages;
 
-            statusMessage = "正在刷新 Git 状态...";
-            UpdateHeaderLabels();
-            RefreshListViews();
-            ForceRepaintUI();
+            // 自动暂存刷新时跳过UI更新，避免闪烁
+            if (!skipRefreshUiDuringAutoStage)
+            {
+                statusMessage = "正在刷新 Git 状态...";
+                UpdateHeaderLabels();
+                RefreshListViews();
+                ForceRepaintUI();
+            }
 
             refreshTask = Task.Run(() => GitUtility.GetWorkingTreeChanges() ?? new List<GitChangeEntry>());
             refreshTask.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
@@ -3125,6 +3132,9 @@ namespace TLNexus.GitU
 
         private void ApplyGitChanges(List<GitChangeEntry> changes, List<string> infoMessages)
         {
+            // 重置自动暂存UI跳过标志
+            skipRefreshUiDuringAutoStage = false;
+
             gitChanges = changes ?? new List<GitChangeEntry>();
 
             // 检测同时是 staged 和 unstaged 的文件（已暂存但又被修改），自动将新修改也暂存
@@ -3144,7 +3154,8 @@ namespace TLNexus.GitU
                     if (!string.IsNullOrEmpty(gitRoot))
                     {
                         GitUtility.AutoStageModifiedStagedFiles(gitRoot, modifiedStagedPaths);
-                        // 重新刷新以获取最新状态
+                        // 重新刷新以获取最新状态，但跳过UI更新避免闪烁
+                        skipRefreshUiDuringAutoStage = true;
                         RequestRefreshData(false);
                         return;
                     }
@@ -3954,6 +3965,21 @@ namespace TLNexus.GitU
 
         private void UpdateHeaderLabels()
         {
+            // 多选时隐藏目标槽，显示文本标签
+            var isMultiSelect = targetAssetPaths.Count > 1;
+            if (targetField != null)
+            {
+                targetField.style.display = isMultiSelect ? DisplayStyle.None : DisplayStyle.Flex;
+            }
+            if (multiSelectLabel != null)
+            {
+                multiSelectLabel.style.display = isMultiSelect ? DisplayStyle.Flex : DisplayStyle.None;
+                if (isMultiSelect)
+                {
+                    multiSelectLabel.text = $"已选择 {targetAssetPaths.Count} 个目标";
+                }
+            }
+
             if (pathLabel != null)
             {
                 if (targetAssetPaths.Count == 0)
