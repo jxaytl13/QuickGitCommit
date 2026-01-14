@@ -4149,14 +4149,44 @@ namespace TLNexus.GitU
 
         private void UpdateListEmptyHints()
         {
+            var loading = refreshInProgress || (refreshTask != null && !refreshTask.IsCompleted);
+
             if (unstagedEmptyHintOverlay != null)
             {
                 unstagedEmptyHintOverlay.style.display = visibleUnstagedItems.Count == 0 ? DisplayStyle.Flex : DisplayStyle.None;
             }
 
+            if (unstagedEmptyHintLabel != null && visibleUnstagedItems.Count == 0)
+            {
+                if (loading)
+                {
+                    unstagedEmptyHintLabel.text = isChineseUi ? "正在读取变更…" : "Loading changes…";
+                }
+                else
+                {
+                    unstagedEmptyHintLabel.text = isChineseUi
+                        ? "暂无变更\n\n提示：\n拖拽条目到“待提交”可加入待提交\nCtrl：多选\nShift：连续选择\nCtrl+A：全选"
+                        : "No changes.\n\nTips:\nDrag items to “Staged” to include them\nCtrl: multi-select\nShift: range select\nCtrl+A: select all";
+                }
+            }
+
             if (stagedEmptyHintOverlay != null)
             {
                 stagedEmptyHintOverlay.style.display = visibleStagedItems.Count == 0 ? DisplayStyle.Flex : DisplayStyle.None;
+            }
+
+            if (stagedEmptyHintLabel != null && visibleStagedItems.Count == 0)
+            {
+                if (loading)
+                {
+                    stagedEmptyHintLabel.text = isChineseUi ? "正在读取待提交…" : "Loading staged…";
+                }
+                else
+                {
+                    stagedEmptyHintLabel.text = isChineseUi
+                        ? "暂无待提交条目\n\n提示：\n拖拽条目到“变更区”可取消待提交\nCtrl：多选\nShift：连续选择\nCtrl+A：全选"
+                        : "No staged items.\n\nTips:\nDrag items to “Unstaged” to unstage\nCtrl: multi-select\nShift: range select\nCtrl+A: select all";
+                }
             }
         }
 

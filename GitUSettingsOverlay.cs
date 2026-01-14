@@ -45,6 +45,7 @@ namespace TLNexus.GitU
         private readonly Label _autoOpenGitClientAfterCommitTitleLabel;
         private readonly Label _autoOpenGitClientAfterCommitDescLabel;
         private readonly Toggle _autoOpenGitClientAfterCommitToggle;
+        private readonly VisualElement _autoOpenGitClientAfterCommitCard;
         private readonly VisualElement _gitClientPathRow;
         private readonly Label _gitClientPathTitleLabel;
         private readonly Label _gitClientPathDescLabel;
@@ -178,10 +179,10 @@ namespace TLNexus.GitU
             _dialogRoot.style.flexDirection = FlexDirection.Column;
             _dialogRoot.style.width = 520;
             _dialogRoot.style.height = 620;
-            _dialogRoot.style.paddingLeft = 20;
-            _dialogRoot.style.paddingRight = 20;
-            _dialogRoot.style.paddingTop = 20;
-            _dialogRoot.style.paddingBottom = 20;
+            _dialogRoot.style.paddingLeft = 0;
+            _dialogRoot.style.paddingRight = 0;
+            _dialogRoot.style.paddingTop = 0;
+            _dialogRoot.style.paddingBottom = 0;
             _dialogRoot.style.backgroundColor = new Color(20f / 255f, 20f / 255f, 20f / 255f, 1f);
             _dialogRoot.style.borderTopWidth = 1;
             _dialogRoot.style.borderRightWidth = 1;
@@ -289,10 +290,23 @@ namespace TLNexus.GitU
             languageRow.Add(languageSpacer);
             languageRow.Add(_languageDropdown);
 
-            // ScrollView：配置路径 + 工具说明
+            // ScrollView：整个设置窗口内容都可滚动（取消“仅功能部分滚动”的设计）。
             var scroll = new ScrollView();
             scroll.style.flexGrow = 1;
+            scroll.style.flexShrink = 1;
             scroll.style.minHeight = 0;
+
+            var scrollContent = new VisualElement();
+            scrollContent.style.flexDirection = FlexDirection.Column;
+            scrollContent.style.alignItems = Align.Stretch;
+            scrollContent.style.justifyContent = Justify.FlexStart;
+            scrollContent.style.width = Length.Percent(100);
+            scrollContent.style.minWidth = 0;
+            scrollContent.style.paddingLeft = 20;
+            scrollContent.style.paddingRight = 20;
+            scrollContent.style.paddingTop = 20;
+            scrollContent.style.paddingBottom = 20;
+            scroll.Add(scrollContent);
 
             _featuresTitleLabel = CreateSectionTitleLabel();
             _featuresTitleLabel.style.marginTop = 14;
@@ -305,6 +319,7 @@ namespace TLNexus.GitU
             ApplyToggleVisualStyle(_autoSaveBeforeOpenToggle);
             ConfigureFeatureToggleRow(_autoSaveBeforeOpenRow, _autoSaveBeforeOpenTitleLabel, _autoSaveBeforeOpenDescLabel, _autoSaveBeforeOpenToggle);
             _autoSaveBeforeOpenRow.style.marginTop = 6;
+            _autoSaveBeforeOpenRow.style.marginBottom = 8;
             _autoSaveBeforeOpenRow.style.backgroundColor = new Color(28f / 255f, 28f / 255f, 28f / 255f, 1f);
             _autoSaveBeforeOpenRow.style.borderTopWidth = 1;
             _autoSaveBeforeOpenRow.style.borderRightWidth = 1;
@@ -337,7 +352,6 @@ namespace TLNexus.GitU
             _autoOpenGitClientAfterCommitRow = CreateToggleRow(out _autoOpenGitClientAfterCommitTitleLabel, out _autoOpenGitClientAfterCommitToggle);
             ApplyToggleVisualStyle(_autoOpenGitClientAfterCommitToggle);
             ConfigureFeatureToggleRow(_autoOpenGitClientAfterCommitRow, _autoOpenGitClientAfterCommitTitleLabel, _autoOpenGitClientAfterCommitDescLabel, _autoOpenGitClientAfterCommitToggle);
-            ApplyCardStyle(_autoOpenGitClientAfterCommitRow);
             _autoOpenGitClientAfterCommitToggle.SetValueWithoutNotify(_autoOpenGitClientAfterCommit);
             _autoOpenGitClientAfterCommitToggle.RegisterValueChangedCallback(evt =>
             {
@@ -360,7 +374,6 @@ namespace TLNexus.GitU
                 _gitClientPathTitleLabel,
                 _gitClientPathDescLabel,
                 CreateGitClientPathControl(out _gitClientPathField, out _gitClientBrowseButton));
-            ApplyCardStyle(_gitClientPathRow);
             _gitClientPathField.SetValueWithoutNotify(_gitClientPath);
             _gitClientPathField.RegisterValueChangedCallback(evt =>
             {
@@ -400,6 +413,14 @@ namespace TLNexus.GitU
                 _onGitClientPathChanged?.Invoke(_gitClientPath);
             };
 
+            _autoOpenGitClientAfterCommitCard = new VisualElement();
+            _autoOpenGitClientAfterCommitCard.style.flexDirection = FlexDirection.Column;
+            _autoOpenGitClientAfterCommitCard.style.alignItems = Align.Stretch;
+            _autoOpenGitClientAfterCommitCard.style.justifyContent = Justify.FlexStart;
+            ApplyCardStyle(_autoOpenGitClientAfterCommitCard);
+            _autoOpenGitClientAfterCommitCard.Add(_autoOpenGitClientAfterCommitRow);
+            _autoOpenGitClientAfterCommitCard.Add(_gitClientPathRow);
+
             _configTitleLabel = CreateSectionTitleLabel();
             _configPathLabel = CreateToolTextLabel();
             _configPathLabel.style.whiteSpace = WhiteSpace.Normal;
@@ -411,22 +432,22 @@ namespace TLNexus.GitU
             _toolIntroductionLabel.style.whiteSpace = WhiteSpace.Normal;
             _toolIntroductionLabel.style.unityTextAlign = TextAnchor.UpperLeft;
 
-            scroll.Add(_featuresTitleLabel);
-            scroll.Add(_autoSaveBeforeOpenRow);
-            scroll.Add(_autoOpenGitClientAfterCommitRow);
-            scroll.Add(_gitClientPathRow);
+            scrollContent.Add(_versionLabel);
+            scrollContent.Add(_authorLabel);
+            scrollContent.Add(_authorLinkButton);
+            scrollContent.Add(_documentLinkButton);
+            scrollContent.Add(languageRow);
 
-            scroll.Add(_configTitleLabel);
-            scroll.Add(_configPathLabel);
-            scroll.Add(_toolsTitleLabel);
-            scroll.Add(_toolIntroductionLabel);
+            scrollContent.Add(_featuresTitleLabel);
+            scrollContent.Add(_autoSaveBeforeOpenRow);
+            scrollContent.Add(_autoOpenGitClientAfterCommitCard);
+
+            scrollContent.Add(_configTitleLabel);
+            scrollContent.Add(_configPathLabel);
+            scrollContent.Add(_toolsTitleLabel);
+            scrollContent.Add(_toolIntroductionLabel);
 
             // 组装
-            _dialogRoot.Add(_versionLabel);
-            _dialogRoot.Add(_authorLabel);
-            _dialogRoot.Add(_authorLinkButton);
-            _dialogRoot.Add(_documentLinkButton);
-            _dialogRoot.Add(languageRow);
             _dialogRoot.Add(scroll);
 
             _overlayRoot.Add(_dialogRoot);
@@ -654,6 +675,7 @@ namespace TLNexus.GitU
                 return;
             }
 
+            element.style.marginBottom = 8;
             element.style.backgroundColor = new Color(28f / 255f, 28f / 255f, 28f / 255f, 1f);
             element.style.borderTopWidth = 1;
             element.style.borderRightWidth = 1;
@@ -808,6 +830,10 @@ namespace TLNexus.GitU
             var enabled = _autoOpenGitClientAfterCommit;
             _gitClientPathField?.SetEnabled(enabled);
             _gitClientBrowseButton?.SetEnabled(enabled);
+            if (_gitClientPathRow != null)
+            {
+                _gitClientPathRow.style.display = enabled ? DisplayStyle.Flex : DisplayStyle.None;
+            }
         }
 
         private static void ConfigureFeatureToggleRow(VisualElement row, Label titleLabel, Label descLabel, Toggle toggle)
