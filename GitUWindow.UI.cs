@@ -1,4 +1,5 @@
 using System;
+using UnityEditor;
 using UnityEditor.UIElements;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -11,6 +12,7 @@ namespace TLNexus.GitU
         private static Color Rgba(byte r, byte g, byte b, float a) => new Color(r / 255f, g / 255f, b / 255f, a);
         private static Color Html(string html) => ColorUtility.TryParseHtmlString(html, out var c) ? c : Color.magenta;
         private static Length Percent(float value) => new Length(value, LengthUnit.Percent);
+        private static readonly Color AccentColor = new Color(57f / 255f, 209f / 255f, 157f / 255f, 1f);
 
         private static void ApplyCardBaseStyle(VisualElement element)
         {
@@ -145,20 +147,13 @@ namespace TLNexus.GitU
 
             void UpdateBorder()
             {
-                if (isFocused || isHovered)
-                {
-                    input.style.borderTopColor = hoverBorder;
-                    input.style.borderRightColor = hoverBorder;
-                    input.style.borderBottomColor = hoverBorder;
-                    input.style.borderLeftColor = hoverBorder;
-                }
-                else
-                {
-                    input.style.borderTopColor = defaultBorder;
-                    input.style.borderRightColor = defaultBorder;
-                    input.style.borderBottomColor = defaultBorder;
-                    input.style.borderLeftColor = defaultBorder;
-                }
+                var borderColor = isFocused
+                    ? AccentColor
+                    : (isHovered ? hoverBorder : defaultBorder);
+                input.style.borderTopColor = borderColor;
+                input.style.borderRightColor = borderColor;
+                input.style.borderBottomColor = borderColor;
+                input.style.borderLeftColor = borderColor;
             }
 
             field.RegisterCallback<FocusInEvent>(_ => { isFocused = true; UpdateBorder(); });
@@ -224,20 +219,13 @@ namespace TLNexus.GitU
 
             void UpdateBorder()
             {
-                if (isFocused || isHovered)
-                {
-                    input.style.borderTopColor = hoverBorder;
-                    input.style.borderRightColor = hoverBorder;
-                    input.style.borderBottomColor = hoverBorder;
-                    input.style.borderLeftColor = hoverBorder;
-                }
-                else
-                {
-                    input.style.borderTopColor = defaultBorder;
-                    input.style.borderRightColor = defaultBorder;
-                    input.style.borderBottomColor = defaultBorder;
-                    input.style.borderLeftColor = defaultBorder;
-                }
+                var borderColor = isFocused
+                    ? AccentColor
+                    : (isHovered ? hoverBorder : defaultBorder);
+                input.style.borderTopColor = borderColor;
+                input.style.borderRightColor = borderColor;
+                input.style.borderBottomColor = borderColor;
+                input.style.borderLeftColor = borderColor;
             }
 
             field.RegisterCallback<FocusInEvent>(_ => { isFocused = true; UpdateBorder(); });
@@ -275,6 +263,25 @@ namespace TLNexus.GitU
 
             try
             {
+                Texture2D FindEditorIcon(params string[] names)
+                {
+                    foreach (string name in names)
+                    {
+                        if (string.IsNullOrEmpty(name))
+                        {
+                            continue;
+                        }
+
+                        var texture = EditorGUIUtility.FindTexture(name);
+                        if (texture != null)
+                        {
+                            return texture;
+                        }
+                    }
+
+                    return EditorGUIUtility.FindTexture("TextAsset Icon");
+                }
+
                 var rootContainer = new VisualElement { name = "rootContainer" };
                 rootContainer.AddToClassList("gitU-root");
                 rootContainer.style.flexGrow = 1;
@@ -316,6 +323,8 @@ namespace TLNexus.GitU
                 headerCard.style.borderTopWidth = 0;
                 headerCard.style.borderRightWidth = 0;
                 headerCard.style.borderLeftWidth = 0;
+                var headerBorderColor = Rgba(255, 255, 255, 0.04f);
+                headerCard.style.borderBottomColor = headerBorderColor;
                 headerCard.style.backgroundColor = Rgb(20, 20, 20);
                 rootContainer.Add(headerCard);
 
@@ -351,47 +360,58 @@ namespace TLNexus.GitU
                 multiSelectLabel.style.unityTextAlign = TextAnchor.MiddleLeft;
                 targetRow.Add(multiSelectLabel);
 
-                var refreshButtonElement = new Button { name = "refreshButton", text = "刷新" };
+                var refreshButtonElement = new Button { name = "refreshButton", text = string.Empty };
                 refreshButtonElement.AddToClassList("primary-button");
                 refreshButtonElement.AddToClassList("refresh-button");
-                var refreshBg = Rgba(255, 255, 255, 0.06f);
-                var refreshHoverBg = Rgba(255, 255, 255, 0.10f);
-                refreshButtonElement.style.backgroundColor = refreshBg;
-                refreshButtonElement.style.borderTopWidth = 1;
-                refreshButtonElement.style.borderRightWidth = 1;
-                refreshButtonElement.style.borderBottomWidth = 1;
-                refreshButtonElement.style.borderLeftWidth = 1;
-                var refreshBorder = Rgba(255, 255, 255, 0.12f);
-                var refreshHoverBorder = Rgba(255, 255, 255, 0.22f);
-                refreshButtonElement.style.borderTopColor = refreshBorder;
-                refreshButtonElement.style.borderRightColor = refreshBorder;
-                refreshButtonElement.style.borderBottomColor = refreshBorder;
-                refreshButtonElement.style.borderLeftColor = refreshBorder;
+                refreshButtonElement.style.backgroundColor = Color.clear;
+                refreshButtonElement.style.borderTopWidth = 0;
+                refreshButtonElement.style.borderRightWidth = 0;
+                refreshButtonElement.style.borderBottomWidth = 0;
+                refreshButtonElement.style.borderLeftWidth = 0;
                 refreshButtonElement.style.height = 22;
-                refreshButtonElement.style.width = 70;
+                refreshButtonElement.style.width = 22;
                 refreshButtonElement.style.borderTopLeftRadius = 4;
                 refreshButtonElement.style.borderTopRightRadius = 4;
                 refreshButtonElement.style.borderBottomRightRadius = 4;
                 refreshButtonElement.style.borderBottomLeftRadius = 4;
                 refreshButtonElement.style.marginRight = 2;
                 refreshButtonElement.style.marginLeft = 2;
-                refreshButtonElement.style.paddingRight = 2;
-                refreshButtonElement.style.paddingLeft = 2;
+                refreshButtonElement.style.paddingRight = 0;
+                refreshButtonElement.style.paddingLeft = 0;
+                refreshButtonElement.style.flexDirection = FlexDirection.Row;
+                refreshButtonElement.style.alignItems = Align.Center;
+                refreshButtonElement.style.justifyContent = Justify.Center;
+                var refreshIconColor = new Color(1f, 1f, 1f, 0.7f);
+                var refreshIcon = new Image { name = "refreshButtonIcon" };
+                refreshIcon.style.width = 14;
+                refreshIcon.style.height = 14;
+                refreshIcon.scaleMode = ScaleMode.ScaleToFit;
+                refreshIcon.tintColor = refreshIconColor;
+                var refreshIconContent = EditorGUIUtility.IconContent("d_Refresh");
+                if (refreshIconContent == null || refreshIconContent.image == null)
+                {
+                    refreshIconContent = EditorGUIUtility.IconContent("Refresh");
+                }
+                if (refreshIconContent == null || refreshIconContent.image == null)
+                {
+                    refreshIconContent = EditorGUIUtility.IconContent("d_RotateTool");
+                }
+                refreshIcon.image = refreshIconContent?.image;
+                if (refreshIcon.image == null)
+                {
+                    refreshIcon.style.display = DisplayStyle.None;
+                }
+                refreshButtonElement.Add(refreshIcon);
+                var refreshHoverBg = Rgba(255, 255, 255, 0.10f);
                 refreshButtonElement.RegisterCallback<MouseEnterEvent>(_ =>
                 {
                     refreshButtonElement.style.backgroundColor = refreshHoverBg;
-                    refreshButtonElement.style.borderTopColor = refreshHoverBorder;
-                    refreshButtonElement.style.borderRightColor = refreshHoverBorder;
-                    refreshButtonElement.style.borderBottomColor = refreshHoverBorder;
-                    refreshButtonElement.style.borderLeftColor = refreshHoverBorder;
+                    refreshIcon.tintColor = Color.white;
                 });
                 refreshButtonElement.RegisterCallback<MouseLeaveEvent>(_ =>
                 {
-                    refreshButtonElement.style.backgroundColor = refreshBg;
-                    refreshButtonElement.style.borderTopColor = refreshBorder;
-                    refreshButtonElement.style.borderRightColor = refreshBorder;
-                    refreshButtonElement.style.borderBottomColor = refreshBorder;
-                    refreshButtonElement.style.borderLeftColor = refreshBorder;
+                    refreshButtonElement.style.backgroundColor = Color.clear;
+                    refreshIcon.tintColor = refreshIconColor;
                 });
 
                 var fengexian1 = new VisualElement { name = "fengexian1" };
@@ -495,10 +515,9 @@ namespace TLNexus.GitU
                     return button;
                 }
 
-                var settingButton = new Button { name = "Setting", text = "S" };
-                var settingBg = Rgba(255, 255, 255, 0.06f);
+                var settingButton = new Button { name = "Setting", text = string.Empty };
                 var settingHoverBg = Rgba(255, 255, 255, 0.10f);
-                settingButton.style.backgroundColor = settingBg;
+                settingButton.style.backgroundColor = Color.clear;
                 settingButton.style.height = 22;
                 settingButton.style.width = 22;
                 settingButton.style.marginLeft = 2;
@@ -507,31 +526,45 @@ namespace TLNexus.GitU
                 settingButton.style.borderTopRightRadius = 4;
                 settingButton.style.borderBottomRightRadius = 4;
                 settingButton.style.borderBottomLeftRadius = 4;
-                settingButton.style.borderTopWidth = 1;
-                settingButton.style.borderRightWidth = 1;
-                settingButton.style.borderBottomWidth = 1;
-                settingButton.style.borderLeftWidth = 1;
-                var settingBorder = Rgba(255, 255, 255, 0.12f);
-                var settingHoverBorder = Rgba(255, 255, 255, 0.22f);
-                settingButton.style.borderTopColor = settingBorder;
-                settingButton.style.borderRightColor = settingBorder;
-                settingButton.style.borderBottomColor = settingBorder;
-                settingButton.style.borderLeftColor = settingBorder;
+                settingButton.style.borderTopWidth = 0;
+                settingButton.style.borderRightWidth = 0;
+                settingButton.style.borderBottomWidth = 0;
+                settingButton.style.borderLeftWidth = 0;
+                settingButton.style.paddingLeft = 0;
+                settingButton.style.paddingRight = 0;
+                settingButton.style.flexDirection = FlexDirection.Row;
+                settingButton.style.alignItems = Align.Center;
+                settingButton.style.justifyContent = Justify.Center;
+                var settingIconColor = new Color(1f, 1f, 1f, 0.7f);
+                var settingIcon = new Image { name = "settingButtonIcon" };
+                settingIcon.style.width = 14;
+                settingIcon.style.height = 14;
+                settingIcon.scaleMode = ScaleMode.ScaleToFit;
+                settingIcon.tintColor = settingIconColor;
+                var settingIconContent = EditorGUIUtility.IconContent("Settings");
+                if (settingIconContent == null || settingIconContent.image == null)
+                {
+                    settingIconContent = EditorGUIUtility.IconContent("d_Settings");
+                }
+                if (settingIconContent == null || settingIconContent.image == null)
+                {
+                    settingIconContent = EditorGUIUtility.IconContent("d_UnityEditor.InspectorWindow");
+                }
+                settingIcon.image = settingIconContent?.image;
+                if (settingIcon.image == null)
+                {
+                    settingIcon.style.display = DisplayStyle.None;
+                }
+                settingButton.Add(settingIcon);
                 settingButton.RegisterCallback<MouseEnterEvent>(_ =>
                 {
                     settingButton.style.backgroundColor = settingHoverBg;
-                    settingButton.style.borderTopColor = settingHoverBorder;
-                    settingButton.style.borderRightColor = settingHoverBorder;
-                    settingButton.style.borderBottomColor = settingHoverBorder;
-                    settingButton.style.borderLeftColor = settingHoverBorder;
+                    settingIcon.tintColor = Color.white;
                 });
                 settingButton.RegisterCallback<MouseLeaveEvent>(_ =>
                 {
-                    settingButton.style.backgroundColor = settingBg;
-                    settingButton.style.borderTopColor = settingBorder;
-                    settingButton.style.borderRightColor = settingBorder;
-                    settingButton.style.borderBottomColor = settingBorder;
-                    settingButton.style.borderLeftColor = settingBorder;
+                    settingButton.style.backgroundColor = Color.clear;
+                    settingIcon.tintColor = settingIconColor;
                 });
                 statusBlock.Add(settingButton);
 
@@ -556,6 +589,11 @@ namespace TLNexus.GitU
                 filterBox.style.borderTopRightRadius = 8;
                 filterBox.style.borderBottomRightRadius = 8;
                 filterBox.style.borderBottomLeftRadius = 8;
+                var filterBorderColor = Rgba(255, 255, 255, 0.04f);
+                filterBox.style.borderTopColor = filterBorderColor;
+                filterBox.style.borderRightColor = filterBorderColor;
+                filterBox.style.borderBottomColor = filterBorderColor;
+                filterBox.style.borderLeftColor = filterBorderColor;
                 filterBox.style.backgroundColor = Rgb(25, 25, 25);
                 filterBox.style.justifyContent = Justify.SpaceBetween;
                 filterBox.style.flexGrow = 0;
@@ -650,8 +688,8 @@ namespace TLNexus.GitU
                 mainArea.AddToClassList("main-area");
                 mainArea.style.flexGrow = 1;
                 mainArea.style.flexDirection = FlexDirection.Column;
-                mainArea.style.height = 620;
-                mainArea.style.flexShrink = 0;
+                mainArea.style.height = StyleKeyword.Auto;
+                mainArea.style.flexShrink = 1;
                 rootContainer.Add(mainArea);
 
                 var middleRow = new VisualElement { name = "middleRow" };
@@ -704,11 +742,50 @@ namespace TLNexus.GitU
                 unstagedHeaderRow.style.paddingTop = 8;
                 leftColumnElement.Add(unstagedHeaderRow);
 
+                var unstagedTitleRow = new VisualElement { name = "unstagedTitleRow" };
+                unstagedTitleRow.style.flexDirection = FlexDirection.Row;
+                unstagedTitleRow.style.alignItems = Align.Center;
+                unstagedTitleRow.style.flexGrow = 1;
+                unstagedTitleRow.style.flexShrink = 1;
+                unstagedHeaderRow.Add(unstagedTitleRow);
+
+                var titleIconColor = Rgba(229, 231, 235, 0.75f);
+                var unstagedIcon = new Image { name = "unstagedTitleIcon" };
+                unstagedIcon.style.width = 12;
+                unstagedIcon.style.height = 12;
+                unstagedIcon.style.marginRight = 6;
+                unstagedIcon.scaleMode = ScaleMode.ScaleToFit;
+                unstagedIcon.tintColor = titleIconColor;
+                unstagedIcon.image = FindEditorIcon(
+                    "d_P4_AddedLocal",
+                    "P4_AddedLocal",
+                    "d_P4_CheckedOutLocal",
+                    "P4_CheckedOutLocal",
+                    "d_P4_CheckOut",
+                    "P4_CheckOut",
+                    "d_console.warnicon.sml",
+                    "console.warnicon.sml",
+                    "d_editicon.sml",
+                    "editicon.sml",
+                    "d_Animation.Record",
+                    "Animation.Record",
+                    "d_CollabChanges",
+                    "CollabChanges",
+                    "d_P4_Conflicted",
+                    "P4_Conflicted"
+                );
+                if (unstagedIcon.image == null)
+                {
+                    unstagedIcon.style.display = DisplayStyle.None;
+                    unstagedIcon.style.marginRight = 0;
+                }
+                unstagedTitleRow.Add(unstagedIcon);
+
                 var unstagedTitle = new Label("UNSTAGED CHANGES") { name = "unstagedTitleLabel" };
                 unstagedTitle.AddToClassList("panel-title");
                 ApplyPanelTitleBaseStyle(unstagedTitle);
                 unstagedTitle.style.unityTextAlign = TextAnchor.MiddleLeft;
-                unstagedHeaderRow.Add(unstagedTitle);
+                unstagedTitleRow.Add(unstagedTitle);
 
                 var unstagedHeaderLabelElement = new Label { name = "unstagedHeaderLabel" };
                 unstagedHeaderLabelElement.AddToClassList("panel-right");
@@ -845,11 +922,41 @@ namespace TLNexus.GitU
                 stagedHeaderRow.style.paddingTop = 8;
                 rightColumnElement.Add(stagedHeaderRow);
 
+                var stagedTitleRow = new VisualElement { name = "stagedTitleRow" };
+                stagedTitleRow.style.flexDirection = FlexDirection.Row;
+                stagedTitleRow.style.alignItems = Align.Center;
+                stagedTitleRow.style.flexGrow = 1;
+                stagedTitleRow.style.flexShrink = 1;
+                stagedHeaderRow.Add(stagedTitleRow);
+
+                var stagedIcon = new Image { name = "stagedTitleIcon" };
+                stagedIcon.style.width = 12;
+                stagedIcon.style.height = 12;
+                stagedIcon.style.marginRight = 6;
+                stagedIcon.scaleMode = ScaleMode.ScaleToFit;
+                stagedIcon.tintColor = titleIconColor;
+                stagedIcon.image = FindEditorIcon(
+                    "d_TestPassed",
+                    "TestPassed",
+                    "d_Valid",
+                    "Valid",
+                    "d_P4_CheckOut",
+                    "P4_CheckOut",
+                    "d_SaveAs",
+                    "SaveAs"
+                );
+                if (stagedIcon.image == null)
+                {
+                    stagedIcon.style.display = DisplayStyle.None;
+                    stagedIcon.style.marginRight = 0;
+                }
+                stagedTitleRow.Add(stagedIcon);
+
                 var stagedTitle = new Label("STAGED CHANGES") { name = "stagedTitleLabel" };
                 stagedTitle.AddToClassList("panel-title");
                 ApplyPanelTitleBaseStyle(stagedTitle);
                 stagedTitle.style.unityTextAlign = TextAnchor.MiddleLeft;
-                stagedHeaderRow.Add(stagedTitle);
+                stagedTitleRow.Add(stagedTitle);
 
                 var stagedHeaderLabelElement = new Label { name = "stagedHeaderLabel" };
                 stagedHeaderLabelElement.AddToClassList("panel-right");
@@ -987,12 +1094,12 @@ namespace TLNexus.GitU
                 sortInfoLabelElement.style.flexGrow = 0;
                 sortInfoLabelElement.style.flexShrink = 0;
                 sortInfoLabelElement.style.marginLeft = 0;
-                sortInfoLabelElement.style.marginRight = 6;
+                sortInfoLabelElement.style.marginRight = 3;
                 sortInfoLabelElement.style.marginTop = 0;
                 sortInfoLabelElement.style.marginBottom = 0;
                 repositoryStatusRightElement.Add(sortInfoLabelElement);
 
-                var repositoryStatusUpButtonElement = new Button { name = "repositoryStatusUpButton", text = "⇅" };
+                var repositoryStatusUpButtonElement = new Button { name = "repositoryStatusUpButton", text = string.Empty };
                 repositoryStatusUpButtonElement.style.width = 20;
                 repositoryStatusUpButtonElement.style.height = 20;
                 repositoryStatusUpButtonElement.style.minWidth = 20;
@@ -1006,45 +1113,80 @@ namespace TLNexus.GitU
                 repositoryStatusUpButtonElement.style.paddingRight = 0;
                 repositoryStatusUpButtonElement.style.paddingBottom = 0;
                 repositoryStatusUpButtonElement.style.paddingLeft = 0;
-                repositoryStatusUpButtonElement.style.unityTextAlign = TextAnchor.MiddleCenter;
-                repositoryStatusUpButtonElement.style.color = Rgba(255, 255, 255, 0.85f);
-                repositoryStatusUpButtonElement.style.fontSize = 12;
+                repositoryStatusUpButtonElement.style.flexDirection = FlexDirection.Row;
+                repositoryStatusUpButtonElement.style.alignItems = Align.Center;
+                repositoryStatusUpButtonElement.style.justifyContent = Justify.Center;
                 repositoryStatusUpButtonElement.style.unityBackgroundImageTintColor = Color.clear;
 
-                var sortButtonBg = Rgba(255, 255, 255, 0.06f);
-                var sortButtonBorder = Rgba(255, 255, 255, 0.12f);
                 var sortButtonHoverBg = Rgba(255, 255, 255, 0.10f);
-                var sortButtonHoverBorder = Rgba(255, 255, 255, 0.22f);
-
-                repositoryStatusUpButtonElement.style.backgroundColor = sortButtonBg;
+                var sortIconColor = new Color(1f, 1f, 1f, 0.7f);
+                repositoryStatusUpButtonElement.style.backgroundColor = Color.clear;
                 repositoryStatusUpButtonElement.style.borderTopLeftRadius = 4;
                 repositoryStatusUpButtonElement.style.borderTopRightRadius = 4;
                 repositoryStatusUpButtonElement.style.borderBottomRightRadius = 4;
                 repositoryStatusUpButtonElement.style.borderBottomLeftRadius = 4;
-                repositoryStatusUpButtonElement.style.borderTopWidth = 1;
-                repositoryStatusUpButtonElement.style.borderRightWidth = 1;
-                repositoryStatusUpButtonElement.style.borderBottomWidth = 1;
-                repositoryStatusUpButtonElement.style.borderLeftWidth = 1;
-                repositoryStatusUpButtonElement.style.borderTopColor = sortButtonBorder;
-                repositoryStatusUpButtonElement.style.borderRightColor = sortButtonBorder;
-                repositoryStatusUpButtonElement.style.borderBottomColor = sortButtonBorder;
-                repositoryStatusUpButtonElement.style.borderLeftColor = sortButtonBorder;
+                repositoryStatusUpButtonElement.style.borderTopWidth = 0;
+                repositoryStatusUpButtonElement.style.borderRightWidth = 0;
+                repositoryStatusUpButtonElement.style.borderBottomWidth = 0;
+                repositoryStatusUpButtonElement.style.borderLeftWidth = 0;
+                var sortIcon = new Image { name = "repositoryStatusUpButtonIcon" };
+                sortIcon.style.width = 14;
+                sortIcon.style.height = 14;
+                sortIcon.scaleMode = ScaleMode.ScaleToFit;
+                sortIcon.tintColor = sortIconColor;
+                Texture2D sortTexture = null;
+                string[] sortIconCandidates =
+                {
+                    "d_TreeEditor.SortAscending",
+                    "TreeEditor.SortAscending",
+                    "d_TreeEditor.SortDescending",
+                    "TreeEditor.SortDescending",
+                    "d_AlphabeticalSorting",
+                    "AlphabeticalSorting",
+                    "d_SortAscending",
+                    "SortAscending",
+                    "d_Sort",
+                    "Sort",
+                    "d_FilterByType",
+                    "FilterByType"
+                };
+                foreach (string candidate in sortIconCandidates)
+                {
+                    sortTexture = EditorGUIUtility.FindTexture(candidate);
+                    if (sortTexture != null)
+                    {
+                        break;
+                    }
+                }
+                if (sortTexture == null)
+                {
+                    sortTexture = EditorGUIUtility.IconContent("TextAsset Icon")?.image as Texture2D;
+                }
+                sortIcon.image = sortTexture;
+                var hasSortIcon = sortTexture != null && sortTexture.width > 0 && sortTexture.height > 0;
+                sortIcon.style.display = hasSortIcon ? DisplayStyle.Flex : DisplayStyle.None;
+                repositoryStatusUpButtonElement.Add(sortIcon);
+
+                var sortTextFallback = new Label { name = "repositoryStatusUpButtonLabel", text = "⇅" };
+                sortTextFallback.style.width = 14;
+                sortTextFallback.style.height = 14;
+                sortTextFallback.style.unityTextAlign = TextAnchor.MiddleCenter;
+                sortTextFallback.style.fontSize = 12;
+                sortTextFallback.style.color = sortIconColor;
+                sortTextFallback.style.display = hasSortIcon ? DisplayStyle.None : DisplayStyle.Flex;
+                repositoryStatusUpButtonElement.Add(sortTextFallback);
 
                 repositoryStatusUpButtonElement.RegisterCallback<MouseEnterEvent>(_ =>
                 {
                     repositoryStatusUpButtonElement.style.backgroundColor = sortButtonHoverBg;
-                    repositoryStatusUpButtonElement.style.borderTopColor = sortButtonHoverBorder;
-                    repositoryStatusUpButtonElement.style.borderRightColor = sortButtonHoverBorder;
-                    repositoryStatusUpButtonElement.style.borderBottomColor = sortButtonHoverBorder;
-                    repositoryStatusUpButtonElement.style.borderLeftColor = sortButtonHoverBorder;
+                    sortIcon.tintColor = Color.white;
+                    sortTextFallback.style.color = Color.white;
                 });
                 repositoryStatusUpButtonElement.RegisterCallback<MouseLeaveEvent>(_ =>
                 {
-                    repositoryStatusUpButtonElement.style.backgroundColor = sortButtonBg;
-                    repositoryStatusUpButtonElement.style.borderTopColor = sortButtonBorder;
-                    repositoryStatusUpButtonElement.style.borderRightColor = sortButtonBorder;
-                    repositoryStatusUpButtonElement.style.borderBottomColor = sortButtonBorder;
-                    repositoryStatusUpButtonElement.style.borderLeftColor = sortButtonBorder;
+                    repositoryStatusUpButtonElement.style.backgroundColor = Color.clear;
+                    sortIcon.tintColor = sortIconColor;
+                    sortTextFallback.style.color = sortIconColor;
                 });
                 repositoryStatusRightElement.Add(repositoryStatusUpButtonElement);
 
@@ -1063,6 +1205,11 @@ namespace TLNexus.GitU
                 commitBox.style.marginBottom = 10;
                 commitBox.style.marginLeft = 10;
                 commitBox.style.backgroundColor = Rgb(25, 25, 25);
+                var commitBorderColor = Rgba(255, 255, 255, 0.04f);
+                commitBox.style.borderTopColor = commitBorderColor;
+                commitBox.style.borderRightColor = commitBorderColor;
+                commitBox.style.borderBottomColor = commitBorderColor;
+                commitBox.style.borderLeftColor = commitBorderColor;
                 commitBox.style.justifyContent = Justify.SpaceBetween;
                 commitBox.style.borderTopLeftRadius = 8;
                 commitBox.style.borderTopRightRadius = 8;
@@ -1085,9 +1232,7 @@ namespace TLNexus.GitU
 
                 var commitMessageTitleLabelElement = new Label("Commit Message") { name = "commitMessageTitleLabel" };
                 commitMessageTitleLabelElement.AddToClassList("commit-message-title");
-                commitMessageTitleLabelElement.style.fontSize = 11;
-                commitMessageTitleLabelElement.style.unityFontStyleAndWeight = FontStyle.Bold;
-                commitMessageTitleLabelElement.style.color = Color.white;
+                ApplyPanelTitleBaseStyle(commitMessageTitleLabelElement);
                 commitMessageTitleLabelElement.style.flexGrow = 1;
                 commitMessageTitleLabelElement.style.flexShrink = 1;
                 commitMessageTitleLabelElement.style.unityTextAlign = TextAnchor.MiddleLeft;
@@ -1129,21 +1274,19 @@ namespace TLNexus.GitU
                 commitRow.style.marginLeft = 10;
                 commitBox.Add(commitRow);
 
-                var historyButtonElement = new Button { name = "historyButton", text = "记录" };
+                var historyButtonElement = new VisualElement { name = "historyButton" };
                 historyButtonElement.AddToClassList("history-button");
-                var historyBg = Rgba(255, 255, 255, 0.06f);
-                var historyHoverBg = Rgba(255, 255, 255, 0.10f);
-                historyButtonElement.style.backgroundColor = historyBg;
-                historyButtonElement.style.borderTopWidth = 1;
-                historyButtonElement.style.borderRightWidth = 1;
-                historyButtonElement.style.borderBottomWidth = 1;
-                historyButtonElement.style.borderLeftWidth = 1;
-                var historyBorder = Rgba(255, 255, 255, 0.12f);
-                var historyHoverBorder = Rgba(255, 255, 255, 0.22f);
-                historyButtonElement.style.borderTopColor = historyBorder;
-                historyButtonElement.style.borderRightColor = historyBorder;
-                historyButtonElement.style.borderBottomColor = historyBorder;
-                historyButtonElement.style.borderLeftColor = historyBorder;
+                historyButtonElement.style.flexDirection = FlexDirection.Row;
+                historyButtonElement.style.alignItems = Align.Center;
+                historyButtonElement.style.justifyContent = Justify.FlexStart;
+                var historyTextColor = Rgba(229, 231, 235, 0.7f);
+                var historyHoverTextColor = Color.white;
+                var historyIconColor = new Color(1f, 1f, 1f, 0.7f);
+                historyButtonElement.style.backgroundColor = Color.clear;
+                historyButtonElement.style.borderTopWidth = 0;
+                historyButtonElement.style.borderRightWidth = 0;
+                historyButtonElement.style.borderBottomWidth = 0;
+                historyButtonElement.style.borderLeftWidth = 0;
                 historyButtonElement.style.borderTopLeftRadius = 4;
                 historyButtonElement.style.borderTopRightRadius = 4;
                 historyButtonElement.style.borderBottomRightRadius = 4;
@@ -1156,21 +1299,47 @@ namespace TLNexus.GitU
                 historyButtonElement.style.paddingBottom = 0;
                 historyButtonElement.style.paddingLeft = 0;
                 historyButtonElement.style.marginLeft = 0;
+                var historyIcon = new Image { name = "historyButtonIcon" };
+                historyIcon.style.width = 14;
+                historyIcon.style.height = 14;
+                historyIcon.style.marginRight = 4;
+                historyIcon.scaleMode = ScaleMode.ScaleToFit;
+                historyIcon.tintColor = historyIconColor;
+                var historyIconContent = EditorGUIUtility.IconContent("d_UnityEditor.HistoryWindow");
+                if (historyIconContent == null || historyIconContent.image == null)
+                {
+                    historyIconContent = EditorGUIUtility.IconContent("d_UnityEditor.ConsoleWindow");
+                }
+                if (historyIconContent == null || historyIconContent.image == null)
+                {
+                    historyIconContent = EditorGUIUtility.IconContent("console.infoicon.sml");
+                }
+                historyIcon.image = historyIconContent?.image;
+                if (historyIcon.image == null)
+                {
+                    historyIcon.style.display = DisplayStyle.None;
+                    historyIcon.style.marginRight = 0;
+                }
+                historyButtonElement.Add(historyIcon);
+
+                var historyLabelElement = new Label { name = "historyButtonLabel", text = "记录" };
+                historyLabelElement.style.whiteSpace = WhiteSpace.NoWrap;
+                historyLabelElement.style.color = historyTextColor;
+                historyButtonElement.Add(historyLabelElement);
                 historyButtonElement.RegisterCallback<MouseEnterEvent>(_ =>
                 {
-                    historyButtonElement.style.backgroundColor = historyHoverBg;
-                    historyButtonElement.style.borderTopColor = historyHoverBorder;
-                    historyButtonElement.style.borderRightColor = historyHoverBorder;
-                    historyButtonElement.style.borderBottomColor = historyHoverBorder;
-                    historyButtonElement.style.borderLeftColor = historyHoverBorder;
+                    if (!historyButtonElement.enabledSelf)
+                    {
+                        return;
+                    }
+
+                    historyLabelElement.style.color = historyHoverTextColor;
+                    historyIcon.tintColor = historyHoverTextColor;
                 });
                 historyButtonElement.RegisterCallback<MouseLeaveEvent>(_ =>
                 {
-                    historyButtonElement.style.backgroundColor = historyBg;
-                    historyButtonElement.style.borderTopColor = historyBorder;
-                    historyButtonElement.style.borderRightColor = historyBorder;
-                    historyButtonElement.style.borderBottomColor = historyBorder;
-                    historyButtonElement.style.borderLeftColor = historyBorder;
+                    historyLabelElement.style.color = historyTextColor;
+                    historyIcon.tintColor = historyIconColor;
                 });
                 commitRow.Add(historyButtonElement);
 
@@ -1186,7 +1355,7 @@ namespace TLNexus.GitU
                 commitButtonElement.AddToClassList("commit-button-local");
                 commitButtonElement.style.width = 140;
                 commitButtonElement.style.height = 28;
-                var accentColor = new Color(57f / 255f, 209f / 255f, 157f / 255f, 1f);
+                var accentColor = AccentColor;
                 commitButtonElement.style.backgroundColor = new Color(accentColor.r, accentColor.g, accentColor.b, 0.2f);
                 commitButtonElement.style.color = accentColor;
                 commitButtonElement.style.unityFontStyleAndWeight = FontStyle.Bold;
@@ -1221,7 +1390,7 @@ namespace TLNexus.GitU
                 commitAndPushButtonElement.style.width = 140;
                 commitAndPushButtonElement.style.height = 28;
                 commitAndPushButtonElement.style.backgroundColor = accentColor;
-                commitAndPushButtonElement.style.color = Color.white;
+                commitAndPushButtonElement.style.color = Rgba(0, 0, 0, 0.95f);
                 commitAndPushButtonElement.style.unityFontStyleAndWeight = FontStyle.Bold;
                 commitAndPushButtonElement.style.marginRight = 0;
                 commitAndPushButtonElement.style.marginLeft = 4;
@@ -1243,6 +1412,7 @@ namespace TLNexus.GitU
                     commitAndPushButtonElement.style.borderRightColor = Color.white;
                     commitAndPushButtonElement.style.borderBottomColor = Color.white;
                     commitAndPushButtonElement.style.borderLeftColor = Color.white;
+                    commitAndPushButtonElement.style.color = Color.white;
                 });
                 commitAndPushButtonElement.RegisterCallback<MouseLeaveEvent>(_ =>
                 {
@@ -1251,6 +1421,7 @@ namespace TLNexus.GitU
                     commitAndPushButtonElement.style.borderRightColor = accentColor;
                     commitAndPushButtonElement.style.borderBottomColor = accentColor;
                     commitAndPushButtonElement.style.borderLeftColor = accentColor;
+                    commitAndPushButtonElement.style.color = Rgba(0, 0, 0, 0.95f);
                 });
                 commitSpacer.Add(commitAndPushButtonElement);
 
@@ -1371,7 +1542,8 @@ namespace TLNexus.GitU
                 saveToDiskHint.style.marginLeft = 10;
                 saveToDiskHint.style.flexShrink = 1;
                 saveToDiskHint.style.flexGrow = 0;
-                saveToDiskHint.style.height = 20;
+                saveToDiskHint.style.minHeight = 20;
+                saveToDiskHint.style.height = StyleKeyword.Auto;
                 saveToDiskHint.style.justifyContent = Justify.FlexStart;
                 saveToDiskHint.style.unityTextAlign = TextAnchor.MiddleLeft;
                 rootContainer.Add(saveToDiskHint);
@@ -1383,7 +1555,8 @@ namespace TLNexus.GitU
                 statusLabelElement.style.color = Rgba(229, 231, 235, 0.85f);
                 statusLabelElement.style.flexShrink = 1;
                 statusLabelElement.style.flexGrow = 0;
-                statusLabelElement.style.height = 20;
+                statusLabelElement.style.minHeight = 20;
+                statusLabelElement.style.height = StyleKeyword.Auto;
                 statusLabelElement.style.marginTop = 0;
                 statusLabelElement.style.marginRight = 10;
                 statusLabelElement.style.marginBottom = 0;
@@ -1395,36 +1568,73 @@ namespace TLNexus.GitU
                 statusLabelElement.style.unityTextAlign = TextAnchor.MiddleLeft;
                 rootContainer.Add(statusLabelElement);
 
+                var toastContainerElement = new VisualElement { name = "toastContainer" };
+                toastContainerElement.style.position = Position.Absolute;
+                toastContainerElement.style.left = 0;
+                toastContainerElement.style.right = 0;
+                toastContainerElement.style.top = 0;
+                toastContainerElement.style.bottom = 0;
+                toastContainerElement.style.alignItems = Align.Center;
+                toastContainerElement.style.justifyContent = Justify.Center;
+                toastContainerElement.pickingMode = PickingMode.Ignore;
+                rootContainer.Add(toastContainerElement);
+
                 var toastLabelElement = new Label("0") { name = "toastLabel" };
                 toastLabelElement.AddToClassList("toast");
                 toastLabelElement.style.display = DisplayStyle.None;
-                toastLabelElement.style.position = Position.Absolute;
-                toastLabelElement.style.left = Percent(20);
-                toastLabelElement.style.right = Percent(20);
-                toastLabelElement.style.bottom = 14;
+                toastLabelElement.style.width = StyleKeyword.Auto;
+                toastLabelElement.style.maxWidth = 520;
                 toastLabelElement.style.paddingTop = 10;
                 toastLabelElement.style.paddingBottom = 10;
                 toastLabelElement.style.paddingLeft = 12;
                 toastLabelElement.style.paddingRight = 12;
-                toastLabelElement.style.borderTopLeftRadius = 12;
-                toastLabelElement.style.borderTopRightRadius = 12;
-                toastLabelElement.style.borderBottomRightRadius = 12;
-                toastLabelElement.style.borderBottomLeftRadius = 12;
-                toastLabelElement.style.backgroundColor = Rgba(17, 17, 21, 0.92f);
-                toastLabelElement.style.borderTopWidth = 1;
-                toastLabelElement.style.borderRightWidth = 1;
-                toastLabelElement.style.borderBottomWidth = 1;
-                toastLabelElement.style.borderLeftWidth = 1;
-                var toastBorder = Rgba(255, 255, 255, 0.12f);
-                toastLabelElement.style.borderTopColor = toastBorder;
-                toastLabelElement.style.borderRightColor = toastBorder;
-                toastLabelElement.style.borderBottomColor = toastBorder;
-                toastLabelElement.style.borderLeftColor = toastBorder;
-                toastLabelElement.style.color = Rgba(229, 231, 235, 0.92f);
+                toastLabelElement.style.borderTopLeftRadius = 8;
+                toastLabelElement.style.borderTopRightRadius = 8;
+                toastLabelElement.style.borderBottomRightRadius = 8;
+                toastLabelElement.style.borderBottomLeftRadius = 8;
+                toastLabelElement.style.backgroundColor = AccentColor;
+                toastLabelElement.style.borderTopWidth = 0;
+                toastLabelElement.style.borderRightWidth = 0;
+                toastLabelElement.style.borderBottomWidth = 0;
+                toastLabelElement.style.borderLeftWidth = 0;
+                toastLabelElement.style.color = Rgba(0, 0, 0, 0.95f);
                 toastLabelElement.style.fontSize = 11;
                 toastLabelElement.style.whiteSpace = WhiteSpace.Normal;
-                toastLabelElement.style.unityTextAlign = TextAnchor.MiddleLeft;
-                rootContainer.Add(toastLabelElement);
+                toastLabelElement.style.unityTextAlign = TextAnchor.MiddleCenter;
+                toastLabelElement.pickingMode = PickingMode.Ignore;
+                toastContainerElement.Add(toastLabelElement);
+
+                var dragBadgeElement = new VisualElement { name = "dragBadge" };
+                dragBadgeElement.style.display = DisplayStyle.None;
+                dragBadgeElement.style.position = Position.Absolute;
+                dragBadgeElement.style.left = 0;
+                dragBadgeElement.style.top = 0;
+                dragBadgeElement.style.width = 22;
+                dragBadgeElement.style.height = 22;
+                dragBadgeElement.style.backgroundColor = AccentColor;
+                dragBadgeElement.style.borderTopWidth = 1;
+                dragBadgeElement.style.borderRightWidth = 1;
+                dragBadgeElement.style.borderBottomWidth = 1;
+                dragBadgeElement.style.borderLeftWidth = 1;
+                var dragBadgeBorder = Rgba(255, 255, 255, 0.28f);
+                dragBadgeElement.style.borderTopColor = dragBadgeBorder;
+                dragBadgeElement.style.borderRightColor = dragBadgeBorder;
+                dragBadgeElement.style.borderBottomColor = dragBadgeBorder;
+                dragBadgeElement.style.borderLeftColor = dragBadgeBorder;
+                dragBadgeElement.style.borderTopLeftRadius = 4;
+                dragBadgeElement.style.borderTopRightRadius = 4;
+                dragBadgeElement.style.borderBottomRightRadius = 4;
+                dragBadgeElement.style.borderBottomLeftRadius = 4;
+                dragBadgeElement.style.alignItems = Align.Center;
+                dragBadgeElement.style.justifyContent = Justify.Center;
+                dragBadgeElement.pickingMode = PickingMode.Ignore;
+                var dragBadgeLabelElement = new Label { name = "dragBadgeLabel" };
+                dragBadgeLabelElement.style.color = Color.white;
+                dragBadgeLabelElement.style.fontSize = 10;
+                dragBadgeLabelElement.style.unityFontStyleAndWeight = FontStyle.Bold;
+                dragBadgeLabelElement.style.unityTextAlign = TextAnchor.MiddleCenter;
+                dragBadgeElement.Add(dragBadgeLabelElement);
+                rootContainer.Add(dragBadgeElement);
 
                 ApplySearchFieldInternals(searchFieldElement);
                 ApplyCommitFieldInternals(commitMessageFieldElement);
@@ -1434,7 +1644,9 @@ namespace TLNexus.GitU
             }
             catch (Exception ex)
             {
-                ShowLayoutLoadError(root, $"构建 UI 失败: {ex.Message}");
+                ShowLayoutLoadError(root, isChineseUi
+                    ? $"构建 UI 失败: {ex.Message}"
+                    : $"Failed to build UI: {ex.Message}");
                 return false;
             }
         }

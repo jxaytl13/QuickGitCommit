@@ -25,6 +25,18 @@ namespace TLNexus.GitU
     {
         public static string ToDisplayName(this GitChangeType type)
         {
+            if (!GitUtility.IsChineseLanguage)
+            {
+                return type switch
+                {
+                    GitChangeType.Added => "Added",
+                    GitChangeType.Modified => "Modified",
+                    GitChangeType.Deleted => "Deleted",
+                    GitChangeType.Renamed => "Renamed",
+                    _ => "Unknown"
+                };
+            }
+
             return type switch
             {
                 GitChangeType.Added => "新增",
@@ -169,6 +181,16 @@ namespace TLNexus.GitU
 
     internal static class GitUtility
     {
+        private const string LanguagePrefKey = "TLNexus.GitU.IsChinese";
+        private static bool isChineseUi = EditorPrefs.GetInt(LanguagePrefKey, 1) != 0;
+
+        internal static void SetLanguage(bool isChinese)
+        {
+            isChineseUi = isChinese;
+        }
+
+        internal static bool IsChineseLanguage => isChineseUi;
+        private static bool IsChineseUi => isChineseUi;
         private const int GitCommandTimeoutShortMs = 30_000;
         private const int GitCommandTimeoutMediumMs = 120_000;
         private const int GitCommandTimeoutLongMs = 300_000;
@@ -347,7 +369,9 @@ namespace TLNexus.GitU
                     {
                         if (!gitRootNotFoundLogged)
                         {
-                            Debug.LogWarning("GitU: 未找到Git根目录（.git）。请确认当前Unity工程在Git仓库内，且已安装并可在命令行调用 git。");
+                            Debug.LogWarning(IsChineseUi
+                                ? "GitU: 未找到Git根目录（.git）。请确认当前Unity工程在Git仓库内，且已安装并可在命令行调用 git。"
+                                : "GitU: Git root (.git) not found. Make sure the Unity project is inside a Git repo and git is available in PATH.");
                             gitRootNotFoundLogged = true;
                         }
                     }
@@ -531,7 +555,9 @@ namespace TLNexus.GitU
                 {
                     if (!string.IsNullOrWhiteSpace(error))
                     {
-                        Debug.LogWarning($"GitU: git status 失败: {repoRoot}\n{error.Trim()}");
+                        Debug.LogWarning(IsChineseUi
+                            ? $"GitU: git status 失败: {repoRoot}\n{error.Trim()}"
+                            : $"GitU: git status failed: {repoRoot}\n{error.Trim()}");
                     }
                     continue;
                 }
@@ -1092,11 +1118,15 @@ namespace TLNexus.GitU
             {
                 if (!string.IsNullOrEmpty(standardError))
                 {
-                    Debug.LogWarning($"Git命令执行失败: git {arguments}\n{standardError}");
+                    Debug.LogWarning(IsChineseUi
+                        ? $"Git命令执行失败: git {arguments}\n{standardError}"
+                        : $"Git command failed: git {arguments}\n{standardError}");
                 }
                 else
                 {
-                    Debug.LogWarning($"Git命令执行失败: git {arguments}");
+                    Debug.LogWarning(IsChineseUi
+                        ? $"Git命令执行失败: git {arguments}"
+                        : $"Git command failed: git {arguments}");
                 }
 
                 return false;
@@ -1121,11 +1151,15 @@ namespace TLNexus.GitU
             {
                 if (!string.IsNullOrEmpty(error))
                 {
-                    Debug.LogWarning($"Git命令执行失败: git {arguments}\n{error}");
+                    Debug.LogWarning(IsChineseUi
+                        ? $"Git命令执行失败: git {arguments}\n{error}"
+                        : $"Git command failed: git {arguments}\n{error}");
                 }
                 else
                 {
-                    Debug.LogWarning($"Git命令执行失败: git {arguments}");
+                    Debug.LogWarning(IsChineseUi
+                        ? $"Git命令执行失败: git {arguments}"
+                        : $"Git command failed: git {arguments}");
                 }
 
                 return false;
@@ -1141,7 +1175,7 @@ namespace TLNexus.GitU
 
             if (string.IsNullOrEmpty(gitRoot))
             {
-                standardError = "未找到 Git 根目录。";
+                standardError = IsChineseUi ? "未找到 Git 根目录。" : "Git root not found.";
                 return false;
             }
 
@@ -1151,10 +1185,11 @@ namespace TLNexus.GitU
         internal static bool StageGitPaths(string gitRoot, IReadOnlyList<GitStageRequest> requests, out string summary)
         {
             summary = string.Empty;
+            var isChinese = IsChineseUi;
 
             if (requests == null || requests.Count == 0)
             {
-                summary = "没有可发送的变更。";
+                summary = isChinese ? "没有可发送的变更。" : "No changes to stage.";
                 return false;
             }
 
@@ -1186,14 +1221,16 @@ namespace TLNexus.GitU
 
             if (total == 0)
             {
-                summary = "没有可发送的变更。";
+                summary = isChinese ? "没有可发送的变更。" : "No changes to stage.";
                 return false;
             }
 
             TryRunGitPathCommandsBatched(gitRoot, "add", addPaths, ref succeeded, ref firstError);
             TryRunGitPathCommandsBatched(gitRoot, "add -u", updatePaths, ref succeeded, ref firstError);
 
-            summary = $"已发送至待提交: {succeeded}/{total} 个条目。";
+            summary = isChinese
+                ? $"已发送至待提交: {succeeded}/{total} 个条目。"
+                : $"Sent to staged: {succeeded}/{total} items.";
             if (succeeded == 0 && !string.IsNullOrEmpty(firstError))
             {
                 summary = $"{summary}\n{firstError}";
@@ -1263,10 +1300,11 @@ namespace TLNexus.GitU
         internal static bool UnstageGitPaths(string gitRoot, IReadOnlyList<string> gitRelativePaths, out string summary)
         {
             summary = string.Empty;
+            var isChinese = IsChineseUi;
 
             if (gitRelativePaths == null || gitRelativePaths.Count == 0)
             {
-                summary = "没有可移出的待提交项。";
+                summary = isChinese ? "没有可移出的待提交项。" : "No staged items to remove.";
                 return false;
             }
 
@@ -1288,13 +1326,15 @@ namespace TLNexus.GitU
 
             if (total == 0)
             {
-                summary = "没有可移出的待提交项。";
+                summary = isChinese ? "没有可移出的待提交项。" : "No staged items to remove.";
                 return false;
             }
 
             TryRunGitPathCommandsBatched(gitRoot, "reset HEAD", paths, ref succeeded, ref firstError);
 
-            summary = $"已从待提交移出: {succeeded}/{total} 个条目。";
+            summary = isChinese
+                ? $"已从待提交移出: {succeeded}/{total} 个条目。"
+                : $"Removed from staged: {succeeded}/{total} items.";
             if (succeeded == 0 && !string.IsNullOrEmpty(firstError))
             {
                 summary = $"{summary}\n{firstError}";
@@ -1734,7 +1774,9 @@ namespace TLNexus.GitU
                         // ignored
                     }
 
-                    standardError = $"Git命令超时（{timeoutMilliseconds}ms）: git {arguments}";
+                    standardError = IsChineseUi
+                        ? $"Git命令超时（{timeoutMilliseconds}ms）: git {arguments}"
+                        : $"Git command timed out ({timeoutMilliseconds}ms): git {arguments}";
                     return false;
                 }
 
@@ -1806,7 +1848,9 @@ namespace TLNexus.GitU
                         // ignored
                     }
 
-                    standardError = $"Git命令超时（{timeoutMilliseconds}ms）: git {arguments}";
+                    standardError = IsChineseUi
+                        ? $"Git命令超时（{timeoutMilliseconds}ms）: git {arguments}"
+                        : $"Git command timed out ({timeoutMilliseconds}ms): git {arguments}";
                     return false;
                 }
 
@@ -1814,7 +1858,9 @@ namespace TLNexus.GitU
 
                 if (!Task.WaitAll(new Task[] { stdoutTask, stderrTask }, timeoutMilliseconds))
                 {
-                    standardError = $"Git输出读取超时（{timeoutMilliseconds}ms）: git {arguments}";
+                    standardError = IsChineseUi
+                        ? $"Git输出读取超时（{timeoutMilliseconds}ms）: git {arguments}"
+                        : $"Git output read timed out ({timeoutMilliseconds}ms): git {arguments}";
                     return false;
                 }
 
@@ -1879,7 +1925,9 @@ namespace TLNexus.GitU
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"定位Git根目录时发生错误: {ex.Message}");
+                Debug.LogWarning(IsChineseUi
+                    ? $"定位Git根目录时发生错误: {ex.Message}"
+                    : $"Error locating Git root: {ex.Message}");
             }
 
             return null;
@@ -1915,7 +1963,9 @@ namespace TLNexus.GitU
             {
                 if (stderr.IndexOf("not a git repository", StringComparison.OrdinalIgnoreCase) < 0)
                 {
-                    Debug.LogWarning($"GitU: rev-parse 失败: {stderr}");
+                    Debug.LogWarning(IsChineseUi
+                        ? $"GitU: rev-parse 失败: {stderr}"
+                        : $"GitU: rev-parse failed: {stderr}");
                 }
 
                 gitRevParseWarningLogged = true;
@@ -1952,7 +2002,9 @@ namespace TLNexus.GitU
             // 过滤掉包含非法路径字符的条目，避免 ArgumentException
             if (gitRelativePath.IndexOfAny(Path.GetInvalidPathChars()) >= 0)
             {
-                Debug.LogWarning($"GitU: 跳过包含非法字符的Git路径: {gitRelativePath}");
+                Debug.LogWarning(IsChineseUi
+                    ? $"GitU: 跳过包含非法字符的Git路径: {gitRelativePath}"
+                    : $"GitU: Skipped Git path with invalid characters: {gitRelativePath}");
                 return null;
             }
 
@@ -1969,7 +2021,9 @@ namespace TLNexus.GitU
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"GitU: 无法组合Git路径 root={gitRoot}, rel={gitRelativePath}, error={ex.Message}");
+                Debug.LogWarning(IsChineseUi
+                    ? $"GitU: 无法组合Git路径 root={gitRoot}, rel={gitRelativePath}, error={ex.Message}"
+                    : $"GitU: Failed to build Git path root={gitRoot}, rel={gitRelativePath}, error={ex.Message}");
                 return null;
             }
 
@@ -2026,10 +2080,11 @@ namespace TLNexus.GitU
 
         internal static bool StageAssets(IEnumerable<GitAssetInfo> assets, out string summary)
         {
+            var isChinese = IsChineseUi;
             var list = assets?.ToList() ?? new List<GitAssetInfo>();
             if (list.Count == 0)
             {
-                summary = "没有可发送的变更。";
+                summary = isChinese ? "没有可发送的变更。" : "No changes to stage.";
                 return false;
             }
 
@@ -2061,11 +2116,13 @@ namespace TLNexus.GitU
 
             if (total == 0)
             {
-                summary = "没有可发送的变更。";
+                summary = isChinese ? "没有可发送的变更。" : "No changes to stage.";
                 return false;
             }
 
-            summary = $"已发送至待提交: {succeeded}/{total} 个条目。";
+            summary = isChinese
+                ? $"已发送至待提交: {succeeded}/{total} 个条目。"
+                : $"Sent to staged: {succeeded}/{total} items.";
             return succeeded > 0;
         }
 
@@ -2098,10 +2155,11 @@ namespace TLNexus.GitU
 
         internal static bool DiscardChanges(IEnumerable<GitAssetInfo> assets, out string summary)
         {
+            var isChinese = IsChineseUi;
             var list = assets?.Where(a => a != null && !string.IsNullOrEmpty(a.AssetPath)).ToList() ?? new List<GitAssetInfo>();
             if (list.Count == 0)
             {
-                summary = "\u6ca1\u6709\u53ef\u653e\u5f03\u7684\u66f4\u6539\u3002";
+                summary = isChinese ? "没有可放弃的更改。" : "No changes to discard.";
                 return false;
             }
 
@@ -2135,8 +2193,12 @@ namespace TLNexus.GitU
             }
 
             summary = succeeded == total
-                ? $"\u5df2\u653e\u5f03 {succeeded} \u9879\u66f4\u6539\u3002"
-                : $"\u5df2\u653e\u5f03 {succeeded}/{total} \u9879\u66f4\u6539\uff08\u5176\u4f59\u8bf7\u67e5\u770b Console \u65e5\u5fd7\uff09\u3002";
+                ? (isChinese
+                    ? $"已放弃 {succeeded} 项更改。"
+                    : $"Discarded {succeeded} changes.")
+                : (isChinese
+                    ? $"已放弃 {succeeded}/{total} 项更改（其余请查看 Console 日志）。"
+                    : $"Discarded {succeeded}/{total} changes (see Console for the rest).");
             return succeeded > 0;
         }
 
@@ -2177,12 +2239,13 @@ namespace TLNexus.GitU
 
         internal static bool UnstageAssets(IEnumerable<GitAssetInfo> assets, out string summary)
         {
+            var isChinese = IsChineseUi;
             var list = assets?.ToList() ?? new List<GitAssetInfo>();
             list.RemoveAll(a => a == null || string.IsNullOrEmpty(a.AssetPath));
 
             if (list.Count == 0)
             {
-                summary = "没有可移出的待提交项。";
+                summary = isChinese ? "没有可移出的待提交项。" : "No staged items to remove.";
                 return false;
             }
 
@@ -2226,11 +2289,13 @@ namespace TLNexus.GitU
 
             if (total == 0)
             {
-                summary = "没有可移出的待提交项。";
+                summary = isChinese ? "没有可移出的待提交项。" : "No staged items to remove.";
                 return false;
             }
 
-            summary = $"已从待提交移出: {succeeded}/{total} 个条目。";
+            summary = isChinese
+                ? $"已从待提交移出: {succeeded}/{total} 个条目。"
+                : $"Removed from staged: {succeeded}/{total} items.";
             return succeeded > 0;
         }
 
