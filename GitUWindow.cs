@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Threading.Tasks;
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -159,6 +160,7 @@ namespace TLNexus.GitU
         private int unstagedSelectionAnchorIndex = -1;
         private int stagedSelectionAnchorIndex = -1;
         private bool? lastActiveStagedView;
+        private bool autoSaveAttemptedThisOpen;
 
         private enum AssetSortKey
         {
@@ -428,6 +430,13 @@ namespace TLNexus.GitU
 
         private void Initialize(IEnumerable<UnityEngine.Object> assets)
         {
+            autoSaveAttemptedThisOpen = false;
+            autoSaveBeforeOpen = EditorPrefs.GetBool(AutoSaveBeforeOpenPrefsKey, false);
+            if (autoSaveBeforeOpen)
+            {
+                TryAutoSaveBeforeOpen();
+            }
+
             SetTargetAssets(assets);
             RefreshData();
         }
@@ -624,6 +633,7 @@ namespace TLNexus.GitU
 
             // For domain reload / layout reload, rebuild UI
             CreateGUI();
+            autoSaveAttemptedThisOpen = false;
 
             // When the window is restored by Unity (layout/domain reload), re-initialize from current selection.
             // Never fall back to "show all repo changes" by default.
@@ -636,16 +646,11 @@ namespace TLNexus.GitU
 
                 if (refreshInProgress || gitOperationInProgress)
                 {
-                    if (autoSaveBeforeOpen)
-                    {
-                        Debug.Log("[GitU] Auto-save on open skipped (busy: refreshing or running git operation).");
-                    }
                     return;
                 }
 
-                if (autoSaveBeforeOpen)
+                if (autoSaveBeforeOpen && !autoSaveAttemptedThisOpen)
                 {
-                    Debug.Log("[GitU] Auto-save on open: executing (SaveAssets + SaveOpenScenes).");
                     TryAutoSaveBeforeOpen();
                 }
 
@@ -731,13 +736,23 @@ namespace TLNexus.GitU
 
         private void TryAutoSaveBeforeOpen()
         {
+            autoSaveAttemptedThisOpen = true;
+
             if (EditorApplication.isPlayingOrWillChangePlaymode)
             {
-                Debug.Log("[GitU] Auto-save on open skipped (play mode).");
+                Debug.LogWarning("[GitU] Auto-save on open skipped (play mode).");
                 return;
             }
 
-            Debug.Log("[GitU] Auto-save on open started.");
+            var isChinese = EditorPrefs.GetInt(LanguagePrefKey, 1) != 0;
+            var dirtyScenePathsBefore = GetDirtyOpenScenePaths(out var untitledDirtyScenesBefore);
+            TryEndEditingActiveTextField();
+
+            var prefabStageSaved = TrySaveDirtyPrefabStage(out var prefabStageSummary);
+            if (!prefabStageSaved && !string.IsNullOrEmpty(prefabStageSummary))
+            {
+                Debug.LogWarning($"[GitU] {prefabStageSummary}");
+            }
 
             var assetsOk = true;
             try
@@ -761,12 +776,201 @@ namespace TLNexus.GitU
                 Debug.LogWarning($"[GitU] Auto SaveOpenScenes failed: {ex.Message}");
             }
 
-            var message = isChineseUi
-                ? $"已自动保存（Assets:{(assetsOk ? "OK" : "Fail")} / Scenes:{(scenesOk ? "OK" : "Fail")}）"
-                : $"Auto-saved (Assets:{(assetsOk ? "OK" : "Fail")} / Scenes:{(scenesOk ? "OK" : "Fail")})";
+            var dirtyScenePathsAfter = GetDirtyOpenScenePaths(out var untitledDirtyScenesAfter);
+            if (dirtyScenePathsAfter.Count > 0 || untitledDirtyScenesAfter > 0)
+            {
+                var remaining = string.Join(", ", dirtyScenePathsAfter.Select(Path.GetFileNameWithoutExtension));
+                var extra = untitledDirtyScenesAfter > 0 ? $" + Untitled({untitledDirtyScenesAfter})" : string.Empty;
+                Debug.LogWarning($"[GitU] Auto-save on open: scenes still dirty after save ({dirtyScenePathsAfter.Count}{extra}): {remaining}");
+                scenesOk = false;
+            }
+
+            var prefabSegment = string.Empty;
+            if (!string.IsNullOrEmpty(prefabStageSummary))
+            {
+                prefabSegment = $" / Prefab:{(prefabStageSaved ? "OK" : "Fail")}";
+            }
+
+            var message = isChinese
+                ? $"已自动保存（Assets:{(assetsOk ? "OK" : "Fail")} / Scenes:{(scenesOk ? "OK" : "Fail")}{prefabSegment} / Dirty:{dirtyScenePathsBefore.Count}->{dirtyScenePathsAfter.Count}）"
+                : $"Auto-saved (Assets:{(assetsOk ? "OK" : "Fail")} / Scenes:{(scenesOk ? "OK" : "Fail")}{prefabSegment} / Dirty:{dirtyScenePathsBefore.Count}->{dirtyScenePathsAfter.Count})";
 
             Debug.Log($"[GitU] {message}");
             ShowTempNotification(message, 2.2f);
+        }
+
+        private static List<string> GetDirtyOpenScenePaths(out int untitledDirtyScenes)
+        {
+            untitledDirtyScenes = 0;
+            var paths = new List<string>();
+
+            int sceneCount;
+            try
+            {
+                sceneCount = EditorSceneManager.sceneCount;
+            }
+            catch
+            {
+                return paths;
+            }
+
+            for (var i = 0; i < sceneCount; i++)
+            {
+                UnityEngine.SceneManagement.Scene scene;
+                try
+                {
+                    scene = EditorSceneManager.GetSceneAt(i);
+                }
+                catch
+                {
+                    continue;
+                }
+
+                if (!scene.IsValid() || !scene.isDirty)
+                {
+                    continue;
+                }
+
+                if (string.IsNullOrEmpty(scene.path))
+                {
+                    untitledDirtyScenes++;
+                    continue;
+                }
+
+                paths.Add(scene.path);
+            }
+
+            return paths;
+        }
+
+        private static bool TryEndEditingActiveTextField()
+        {
+            try
+            {
+                var method = typeof(EditorGUI).GetMethod("EndEditingActiveTextField", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+                if (method != null)
+                {
+                    method.Invoke(null, null);
+                    return true;
+                }
+            }
+            catch
+            {
+                // ignored
+            }
+
+            try
+            {
+                GUI.FocusControl(null);
+            }
+            catch
+            {
+                // ignored
+            }
+
+            try
+            {
+                GUIUtility.keyboardControl = 0;
+            }
+            catch
+            {
+                // ignored
+            }
+
+            try
+            {
+                var prop = typeof(EditorGUIUtility).GetProperty("editingTextField", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+                if (prop != null && prop.CanWrite)
+                {
+                    prop.SetValue(null, false, null);
+                }
+            }
+            catch
+            {
+                // ignored
+            }
+
+            return false;
+        }
+
+        private static bool TrySaveDirtyPrefabStage(out string summary)
+        {
+            summary = null;
+
+            object prefabStage = null;
+            try
+            {
+                var utility = Type.GetType("UnityEditor.SceneManagement.PrefabStageUtility, UnityEditor", throwOnError: false)
+                              ?? Type.GetType("UnityEditor.Experimental.SceneManagement.PrefabStageUtility, UnityEditor", throwOnError: false);
+                var method = utility?.GetMethod("GetCurrentPrefabStage", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+                prefabStage = method?.Invoke(null, null);
+            }
+            catch
+            {
+                prefabStage = null;
+            }
+
+            if (prefabStage == null)
+            {
+                return true;
+            }
+
+            try
+            {
+                var stageType = prefabStage.GetType();
+
+                string assetPath = null;
+                var assetPathProp = stageType.GetProperty("assetPath", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+                                  ?? stageType.GetProperty("prefabAssetPath", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                if (assetPathProp != null)
+                {
+                    assetPath = assetPathProp.GetValue(prefabStage) as string;
+                }
+
+                var sceneProp = stageType.GetProperty("scene", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                var stageScene = sceneProp != null
+                    ? (UnityEngine.SceneManagement.Scene)sceneProp.GetValue(prefabStage)
+                    : default;
+
+                var wasDirty = stageScene.IsValid() && stageScene.isDirty;
+                if (!wasDirty)
+                {
+                    return true;
+                }
+
+                var saveMethod = stageType.GetMethod("SavePrefab", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, null, Type.EmptyTypes, null);
+                if (saveMethod != null)
+                {
+                    saveMethod.Invoke(prefabStage, null);
+                }
+                else
+                {
+                    EditorApplication.ExecuteMenuItem("File/Save");
+                }
+
+                stageScene = sceneProp != null
+                    ? (UnityEngine.SceneManagement.Scene)sceneProp.GetValue(prefabStage)
+                    : default;
+                var stillDirty = stageScene.IsValid() && stageScene.isDirty;
+
+                if (stillDirty)
+                {
+                    summary = string.IsNullOrEmpty(assetPath)
+                        ? "PrefabStage: save attempted but still dirty."
+                        : $"PrefabStage: save attempted but still dirty ({Path.GetFileNameWithoutExtension(assetPath)}).";
+                    return false;
+                }
+
+                summary = string.IsNullOrEmpty(assetPath)
+                    ? "PrefabStage: saved."
+                    : $"PrefabStage: saved ({Path.GetFileNameWithoutExtension(assetPath)}).";
+                return true;
+            }
+            catch (Exception ex)
+            {
+                summary = $"PrefabStage: save failed ({ex.Message}).";
+                return false;
+            }
         }
 
         private bool TryOpenExternalGitClient(out string error)
