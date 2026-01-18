@@ -4734,7 +4734,45 @@ namespace TLNexus.GitU
                     return;
                 }
 
-                HandleRowSelection(stagedView, refs.Info, refs.BoundIndex, evt.shiftKey, evt.actionKey);
+                var pointerDownInfo = refs.Info;
+                if (pointerDownInfo == null || string.IsNullOrEmpty(pointerDownInfo.AssetPath))
+                {
+                    return;
+                }
+
+                if (!evt.shiftKey && !evt.actionKey)
+                {
+                    var thisSet = stagedView ? selectedStagedPaths : selectedUnstagedPaths;
+                    var otherSet = stagedView ? selectedUnstagedPaths : selectedStagedPaths;
+                    if (otherSet.Count > 0)
+                    {
+                        otherSet.Clear();
+                    }
+
+                    if (!thisSet.Contains(pointerDownInfo.AssetPath))
+                    {
+                        HandleRowSelection(stagedView, pointerDownInfo, refs.BoundIndex, shift: false, actionKey: false);
+                    }
+                    else
+                    {
+                        if (stagedView)
+                        {
+                            stagedSelectionAnchorIndex = refs.BoundIndex;
+                        }
+                        else
+                        {
+                            unstagedSelectionAnchorIndex = refs.BoundIndex;
+                        }
+
+                        lastActiveStagedView = stagedView;
+                        unstagedScrollView?.RefreshItems();
+                        stagedScrollView?.RefreshItems();
+                    }
+                }
+                else
+                {
+                    HandleRowSelection(stagedView, pointerDownInfo, refs.BoundIndex, evt.shiftKey, evt.actionKey);
+                }
 
                 refs.DragArmed = true;
                 refs.DragStartPosition = new Vector3(evt.position.x, evt.position.y, 0f);
@@ -5069,12 +5107,16 @@ namespace TLNexus.GitU
             }
 
             var sourceSet = sourceStaged ? selectedStagedPaths : selectedUnstagedPaths;
-            if (!sourceSet.Contains(info.AssetPath))
+            if (sourceSet.Count == 0)
             {
-                HandleRowSelection(sourceStaged, info, index, shift: false, actionKey: false);
+                sourceSet.Add(info.AssetPath);
+            }
+            else if (!sourceSet.Contains(info.AssetPath))
+            {
+                sourceSet.Add(info.AssetPath);
             }
 
-            var selectedPaths = (sourceStaged ? selectedStagedPaths : selectedUnstagedPaths).ToList();
+            var selectedPaths = sourceSet.ToList();
             if (selectedPaths.Count == 0)
             {
                 selectedPaths.Add(info.AssetPath);
