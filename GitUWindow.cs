@@ -267,7 +267,7 @@ namespace TLNexus.GitU
         // Notification
         private double notificationEndTime;
 
-        [MenuItem("Assets/\u5feb\u6377Git\u63d0\u4ea4", false, 2000)]
+        [MenuItem("Assets/T\u00b7L NEXUS/GitU", false, 2000)]
         private static void OpenFromContext()
         {
             var objects = Selection.objects;
@@ -306,7 +306,7 @@ namespace TLNexus.GitU
             window.Show();
         }
 
-        [MenuItem("Assets/\u5feb\u6377Git\u63d0\u4ea4", true)]
+        [MenuItem("Assets/T\u00b7L NEXUS/GitU", true)]
         private static bool ValidateOpenFromContext()
         {
             var objects = Selection.objects;
@@ -332,7 +332,7 @@ namespace TLNexus.GitU
             return false;
         }
 
-        [MenuItem("GameObject/\u5feb\u6377Git\u63d0\u4ea4", false, 2000)]
+        [MenuItem("GameObject/T\u00b7L NEXUS/GitU", false, 2000)]
         private static void OpenFromGameObject(MenuCommand command)
         {
             var gameObjects = Selection.gameObjects;
@@ -376,7 +376,7 @@ namespace TLNexus.GitU
             window.Show();
         }
 
-        [MenuItem("GameObject/\u5feb\u6377Git\u63d0\u4ea4", true)]
+        [MenuItem("GameObject/T\u00b7L NEXUS/GitU", true)]
         private static bool ValidateOpenFromGameObject(MenuCommand command)
         {
             var gameObjects = Selection.gameObjects;
