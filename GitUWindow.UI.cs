@@ -383,8 +383,8 @@ namespace TLNexus.GitU
                 refreshButtonElement.style.justifyContent = Justify.Center;
                 var refreshIconColor = new Color(1f, 1f, 1f, 0.7f);
                 var refreshIcon = new Image { name = "refreshButtonIcon" };
-                refreshIcon.style.width = 14;
-                refreshIcon.style.height = 14;
+                refreshIcon.style.width = 16;
+                refreshIcon.style.height = 16;
                 refreshIcon.scaleMode = ScaleMode.ScaleToFit;
                 refreshIcon.tintColor = refreshIconColor;
                 var refreshIconContent = EditorGUIUtility.IconContent("d_Refresh");
@@ -537,8 +537,8 @@ namespace TLNexus.GitU
                 settingButton.style.justifyContent = Justify.Center;
                 var settingIconColor = new Color(1f, 1f, 1f, 0.7f);
                 var settingIcon = new Image { name = "settingButtonIcon" };
-                settingIcon.style.width = 14;
-                settingIcon.style.height = 14;
+                settingIcon.style.width = 16;
+                settingIcon.style.height = 16;
                 settingIcon.scaleMode = ScaleMode.ScaleToFit;
                 settingIcon.tintColor = settingIconColor;
                 var settingIconContent = EditorGUIUtility.IconContent("Settings");
@@ -1130,8 +1130,8 @@ namespace TLNexus.GitU
                 repositoryStatusUpButtonElement.style.borderBottomWidth = 0;
                 repositoryStatusUpButtonElement.style.borderLeftWidth = 0;
                 var sortIcon = new Image { name = "repositoryStatusUpButtonIcon" };
-                sortIcon.style.width = 14;
-                sortIcon.style.height = 14;
+                sortIcon.style.width = 16;
+                sortIcon.style.height = 16;
                 sortIcon.scaleMode = ScaleMode.ScaleToFit;
                 sortIcon.tintColor = sortIconColor;
                 Texture2D sortTexture = null;
@@ -1300,8 +1300,8 @@ namespace TLNexus.GitU
                 historyButtonElement.style.paddingLeft = 0;
                 historyButtonElement.style.marginLeft = 0;
                 var historyIcon = new Image { name = "historyButtonIcon" };
-                historyIcon.style.width = 14;
-                historyIcon.style.height = 14;
+                historyIcon.style.width = 16;
+                historyIcon.style.height = 16;
                 historyIcon.style.marginRight = 4;
                 historyIcon.scaleMode = ScaleMode.ScaleToFit;
                 historyIcon.tintColor = historyIconColor;
