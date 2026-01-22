@@ -1223,14 +1223,13 @@ namespace TLNexus.GitU
         {
             var button = new Button();
 
-            // 默认样式
+            // 对齐“提交并推送”按钮风格：默认强调色填充 + 强调色描边 + 黑字；悬停时白底白描边。
             var accent = new Color(57f / 255f, 209f / 255f, 157f / 255f, 1f);
-            var dark = new Color(20f / 255f, 20f / 255f, 20f / 255f, 1f);
+            var normalBg = accent;
+            var hoverBg = Color.white;
+            var textColor = new Color(0f, 0f, 0f, 0.95f);
 
-            var normalBg = new Color(accent.r, accent.g, accent.b, 0.1f);
-            var activeBg = new Color(accent.r, accent.g, accent.b, 0.25f);
-
-            button.style.height = 30;
+            button.style.height = 28;
             button.style.flexShrink = 0;
             button.style.marginTop = 5;
             button.style.marginBottom = 5;
@@ -1242,73 +1241,39 @@ namespace TLNexus.GitU
             button.style.borderRightWidth = 1;
             button.style.borderBottomWidth = 1;
             button.style.borderLeftWidth = 1;
-            button.style.borderTopLeftRadius = 4;
-            button.style.borderTopRightRadius = 4;
-            button.style.borderBottomLeftRadius = 4;
-            button.style.borderBottomRightRadius = 4;
+            button.style.borderTopLeftRadius = 6;
+            button.style.borderTopRightRadius = 6;
+            button.style.borderBottomLeftRadius = 6;
+            button.style.borderBottomRightRadius = 6;
             button.style.borderTopColor = accent;
             button.style.borderRightColor = accent;
             button.style.borderBottomColor = accent;
             button.style.borderLeftColor = accent;
             button.style.backgroundColor = normalBg;
-            button.style.color = accent;
-
-            var hovering = false;
-            var pressing = false;
-
-            void ApplyState()
-            {
-                if (pressing)
-                {
-                    button.style.backgroundColor = activeBg;
-                    button.style.color = dark;
-                    return;
-                }
-
-                if (hovering)
-                {
-                    button.style.backgroundColor = accent;
-                    button.style.color = dark;
-                    return;
-                }
-
-                button.style.backgroundColor = normalBg;
-                button.style.color = accent;
-            }
+            button.style.color = textColor;
+            button.style.unityFontStyleAndWeight = FontStyle.Bold;
 
             button.RegisterCallback<MouseEnterEvent>(_ =>
             {
-                hovering = true;
-                ApplyState();
+                if (!button.enabledSelf)
+                {
+                    return;
+                }
+
+                button.style.backgroundColor = hoverBg;
+                button.style.borderTopColor = Color.white;
+                button.style.borderRightColor = Color.white;
+                button.style.borderBottomColor = Color.white;
+                button.style.borderLeftColor = Color.white;
             });
 
             button.RegisterCallback<MouseLeaveEvent>(_ =>
             {
-                hovering = false;
-                pressing = false;
-                ApplyState();
-            });
-
-            button.RegisterCallback<MouseDownEvent>(evt =>
-            {
-                if (evt.button != 0)
-                {
-                    return;
-                }
-
-                pressing = true;
-                ApplyState();
-            });
-
-            button.RegisterCallback<MouseUpEvent>(evt =>
-            {
-                if (evt.button != 0)
-                {
-                    return;
-                }
-
-                pressing = false;
-                ApplyState();
+                button.style.backgroundColor = normalBg;
+                button.style.borderTopColor = accent;
+                button.style.borderRightColor = accent;
+                button.style.borderBottomColor = accent;
+                button.style.borderLeftColor = accent;
             });
 
             return button;

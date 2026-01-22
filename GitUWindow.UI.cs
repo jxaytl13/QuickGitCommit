@@ -1356,7 +1356,7 @@ namespace TLNexus.GitU
                 commitButtonElement.style.width = 140;
                 commitButtonElement.style.height = 28;
                 var accentColor = AccentColor;
-                commitButtonElement.style.backgroundColor = new Color(accentColor.r, accentColor.g, accentColor.b, 0.2f);
+                commitButtonElement.style.backgroundColor = new Color(accentColor.r, accentColor.g, accentColor.b, 0f);
                 commitButtonElement.style.color = accentColor;
                 commitButtonElement.style.unityFontStyleAndWeight = FontStyle.Bold;
                 commitButtonElement.style.marginLeft = 4;
@@ -1375,12 +1375,25 @@ namespace TLNexus.GitU
                 commitButtonElement.style.borderLeftColor = accentColor;
                 commitButtonElement.RegisterCallback<MouseEnterEvent>(_ =>
                 {
-                    commitButtonElement.style.backgroundColor = accentColor;
-                    commitButtonElement.style.color = Color.white;
+                    if (!commitButtonElement.enabledSelf)
+                    {
+                        return;
+                    }
+
+                    commitButtonElement.style.backgroundColor = Color.white;
+                    commitButtonElement.style.borderTopColor = Color.white;
+                    commitButtonElement.style.borderRightColor = Color.white;
+                    commitButtonElement.style.borderBottomColor = Color.white;
+                    commitButtonElement.style.borderLeftColor = Color.white;
+                    commitButtonElement.style.color = Rgba(0, 0, 0, 0.95f);
                 });
                 commitButtonElement.RegisterCallback<MouseLeaveEvent>(_ =>
                 {
-                    commitButtonElement.style.backgroundColor = new Color(accentColor.r, accentColor.g, accentColor.b, 0.2f);
+                    commitButtonElement.style.backgroundColor = new Color(accentColor.r, accentColor.g, accentColor.b, 0f);
+                    commitButtonElement.style.borderTopColor = accentColor;
+                    commitButtonElement.style.borderRightColor = accentColor;
+                    commitButtonElement.style.borderBottomColor = accentColor;
+                    commitButtonElement.style.borderLeftColor = accentColor;
                     commitButtonElement.style.color = accentColor;
                 });
                 commitSpacer.Add(commitButtonElement);
@@ -1408,11 +1421,17 @@ namespace TLNexus.GitU
                 commitAndPushButtonElement.style.borderLeftColor = accentColor;
                 commitAndPushButtonElement.RegisterCallback<MouseEnterEvent>(_ =>
                 {
+                    if (!commitAndPushButtonElement.enabledSelf)
+                    {
+                        return;
+                    }
+
+                    commitAndPushButtonElement.style.backgroundColor = Color.white;
                     commitAndPushButtonElement.style.borderTopColor = Color.white;
                     commitAndPushButtonElement.style.borderRightColor = Color.white;
                     commitAndPushButtonElement.style.borderBottomColor = Color.white;
                     commitAndPushButtonElement.style.borderLeftColor = Color.white;
-                    commitAndPushButtonElement.style.color = Color.white;
+                    commitAndPushButtonElement.style.color = Rgba(0, 0, 0, 0.95f);
                 });
                 commitAndPushButtonElement.RegisterCallback<MouseLeaveEvent>(_ =>
                 {
@@ -1629,7 +1648,7 @@ namespace TLNexus.GitU
                 dragBadgeElement.style.justifyContent = Justify.Center;
                 dragBadgeElement.pickingMode = PickingMode.Ignore;
                 var dragBadgeLabelElement = new Label { name = "dragBadgeLabel" };
-                dragBadgeLabelElement.style.color = Color.white;
+                dragBadgeLabelElement.style.color = Rgba(0, 0, 0, 0.95f);
                 dragBadgeLabelElement.style.fontSize = 10;
                 dragBadgeLabelElement.style.unityFontStyleAndWeight = FontStyle.Bold;
                 dragBadgeLabelElement.style.unityTextAlign = TextAnchor.MiddleCenter;
