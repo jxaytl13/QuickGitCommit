@@ -1711,6 +1711,9 @@ namespace TLNexus.GitU
 
             if (completedKind == GitOperationKind.Commit || completedKind == GitOperationKind.CommitAndPush)
             {
+                // 隐藏进行中的中间提示条，避免在结果对话框/摘要显示时仍然可见
+                HideTempNotification();
+
                 var dialogTitle = isChineseUi ? "提交" : "Commit";
                 var dialogOk = isChineseUi ? "确定" : "OK";
                 var dialogCancel = isChineseUi ? "取消" : "Cancel";
@@ -4718,6 +4721,9 @@ namespace TLNexus.GitU
                 ? (isChineseUi ? "正在提交并推送..." : "Committing & pushing...")
                 : (isChineseUi ? "正在提交..." : "Committing...");
             UpdateHeaderLabels();
+            // 在中间显示长期的提示条（替代底部 statusLabel 的进行中提示）
+            // 使用较长的超时时间，完成后由 PollGitOperationTask 隐藏或替换为结果提示。
+            ShowTempNotification(statusMessage, 9999f);
             ForceRepaintUI();
 
             var isChinese = isChineseUi;
