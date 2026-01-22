@@ -214,6 +214,8 @@ namespace TLNexus.GitU
         private Label toastLabel;
         private VisualElement dragBadge;
         private Label dragBadgeLabel;
+        private bool dragBadgeCleanupQueued;
+        private double lastDragBadgeUpdateTime;
 
         private VisualElement leftColumn;
         private VisualElement unstagedListContainer;
@@ -712,6 +714,20 @@ namespace TLNexus.GitU
                 notificationEndTime = 0;
             }
 
+            // DragAndDrop 的结束事件在 UI Toolkit 下并不总能可靠回调（例如拖拽过程中回到源区域松开）。
+            // 兜底：如果拖拽徽章还在显示、鼠标已松开且一段时间未收到 DragUpdated，则认为拖拽已结束并清理。
+            if (dragBadge != null && dragBadge.style.display.value != DisplayStyle.None)
+            {
+                var anyMouseDown = Input.GetMouseButton(0) || Input.GetMouseButton(1) || Input.GetMouseButton(2);
+                if (!anyMouseDown &&
+                    lastDragBadgeUpdateTime > 0 &&
+                    EditorApplication.timeSinceStartup - lastDragBadgeUpdateTime > 0.05)
+                {
+                    DragAndDrop.SetGenericData(DragPayloadKey, null);
+                    HideDragBadge();
+                }
+            }
+
             PollRefreshTask();
             PollGitOperationTask();
             PollDebouncedRefresh();
@@ -1053,6 +1069,18 @@ namespace TLNexus.GitU
             }
         }
 
+        private void HideTempNotification()
+        {
+            if (toastLabel == null)
+            {
+                return;
+            }
+
+            toastLabel.style.display = DisplayStyle.None;
+            toastLabel.text = string.Empty;
+            notificationEndTime = 0;
+        }
+
         private void CreateGUI()
         {
             historyDropdownVisible = false;
@@ -1234,6 +1262,7 @@ namespace TLNexus.GitU
                 historyListView.onSelectionChange += OnHistoryListSelectionChanged;
             }
             root.RegisterCallback<MouseDownEvent>(OnRootMouseDown, TrickleDown.TrickleDown);
+            root.RegisterCallback<MouseUpEvent>(OnRootMouseUp, TrickleDown.TrickleDown);
             root.RegisterCallback<KeyDownEvent>(OnRootKeyDown, TrickleDown.TrickleDown);
             UpdateHistoryButtonState();
             if (commitButton != null)
@@ -1836,6 +1865,7 @@ namespace TLNexus.GitU
             dragBadgeLabel.text = count.ToString();
             dragBadgeLabel.style.fontSize = count >= 100 ? 9 : (count >= 10 ? 10 : 11);
             dragBadge.style.display = DisplayStyle.Flex;
+            lastDragBadgeUpdateTime = EditorApplication.timeSinceStartup;
         }
 
         private void HideDragBadge()
@@ -1846,6 +1876,7 @@ namespace TLNexus.GitU
             }
 
             dragBadge.style.display = DisplayStyle.None;
+            lastDragBadgeUpdateTime = 0;
         }
 
         private void LoadSortSettings()
@@ -4140,6 +4171,11 @@ namespace TLNexus.GitU
 
         private void OnRootMouseDown(MouseDownEvent evt)
         {
+            if (toastLabel != null && toastLabel.style.display.value != DisplayStyle.None)
+            {
+                HideTempNotification();
+            }
+
             if (!historyDropdownVisible || historyDropdown == null || historyButton == null)
             {
                 return;
@@ -4154,8 +4190,44 @@ namespace TLNexus.GitU
             HideHistoryDropdown();
         }
 
+        private void OnRootMouseUp(MouseUpEvent _)
+        {
+            if (dragBadge == null || dragBadge.style.display.value == DisplayStyle.None)
+            {
+                return;
+            }
+
+            QueueDragBadgeCleanup();
+        }
+
+        private void QueueDragBadgeCleanup()
+        {
+            if (dragBadgeCleanupQueued)
+            {
+                return;
+            }
+
+            dragBadgeCleanupQueued = true;
+            EditorApplication.delayCall += () =>
+            {
+                dragBadgeCleanupQueued = false;
+                DragAndDrop.SetGenericData(DragPayloadKey, null);
+                HideDragBadge();
+            };
+        }
+
         private void OnRootKeyDown(KeyDownEvent evt)
         {
+            if (evt.keyCode == KeyCode.Escape)
+            {
+                if (dragBadge != null && dragBadge.style.display.value != DisplayStyle.None)
+                {
+                    QueueDragBadgeCleanup();
+                }
+
+                return;
+            }
+
             if (!evt.actionKey || evt.keyCode != KeyCode.A)
             {
                 return;
@@ -4754,12 +4826,34 @@ namespace TLNexus.GitU
             var hasMessage = !string.IsNullOrWhiteSpace(commitMessage);
             if (commitButton != null)
             {
-                commitButton.SetEnabled(hasMessage && !refreshInProgress && !gitOperationInProgress);
+                var enabled = hasMessage && !refreshInProgress && !gitOperationInProgress;
+                commitButton.SetEnabled(enabled);
+                if (!enabled)
+                {
+                    var accentColor = AccentColor;
+                    commitButton.style.backgroundColor = new Color(accentColor.r, accentColor.g, accentColor.b, 0f);
+                    commitButton.style.borderTopColor = accentColor;
+                    commitButton.style.borderRightColor = accentColor;
+                    commitButton.style.borderBottomColor = accentColor;
+                    commitButton.style.borderLeftColor = accentColor;
+                    commitButton.style.color = accentColor;
+                }
             }
 
             if (commitAndPushButton != null)
             {
-                commitAndPushButton.SetEnabled(hasMessage && !refreshInProgress && !gitOperationInProgress);
+                var enabled = hasMessage && !refreshInProgress && !gitOperationInProgress;
+                commitAndPushButton.SetEnabled(enabled);
+                if (!enabled)
+                {
+                    var accentColor = AccentColor;
+                    commitAndPushButton.style.backgroundColor = accentColor;
+                    commitAndPushButton.style.borderTopColor = accentColor;
+                    commitAndPushButton.style.borderRightColor = accentColor;
+                    commitAndPushButton.style.borderBottomColor = accentColor;
+                    commitAndPushButton.style.borderLeftColor = accentColor;
+                    commitAndPushButton.style.color = Rgba(0, 0, 0, 0.95f);
+                }
             }
         }
 
