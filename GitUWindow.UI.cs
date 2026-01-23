@@ -1444,17 +1444,26 @@ namespace TLNexus.GitU
                 });
                 commitSpacer.Add(commitAndPushButtonElement);
 
+                var historyOverlayElement = new VisualElement { name = "historyOverlay" };
+                historyOverlayElement.style.display = DisplayStyle.None;
+                historyOverlayElement.style.position = Position.Absolute;
+                historyOverlayElement.style.left = 0;
+                historyOverlayElement.style.right = 0;
+                historyOverlayElement.style.top = 0;
+                historyOverlayElement.style.bottom = 0;
+                historyOverlayElement.style.backgroundColor = new Color(0f, 0f, 0f, 0.65f);
+                historyOverlayElement.style.justifyContent = Justify.Center;
+                historyOverlayElement.style.alignItems = Align.Center;
+                rootContainer.Add(historyOverlayElement);
+
                 var historyDropdownElement = new VisualElement { name = "historyDropdown" };
                 historyDropdownElement.AddToClassList("history-modal");
                 historyDropdownElement.style.display = DisplayStyle.None;
-                historyDropdownElement.style.position = Position.Absolute;
-                historyDropdownElement.style.left = 0;
-                historyDropdownElement.style.top = 0;
-                historyDropdownElement.style.right = StyleKeyword.Auto;
-                historyDropdownElement.style.bottom = StyleKeyword.Auto;
+                historyDropdownElement.style.position = Position.Relative;
                 historyDropdownElement.style.width = 480;
                 historyDropdownElement.style.height = 640;
-                historyDropdownElement.style.flexGrow = 1;
+                historyDropdownElement.style.flexGrow = 0;
+                historyDropdownElement.style.flexShrink = 0;
                 historyDropdownElement.style.flexDirection = FlexDirection.Column;
                 historyDropdownElement.style.paddingTop = 0;
                 historyDropdownElement.style.paddingRight = 0;
@@ -1474,7 +1483,7 @@ namespace TLNexus.GitU
                 historyDropdownElement.style.borderTopRightRadius = 12;
                 historyDropdownElement.style.borderBottomRightRadius = 12;
                 historyDropdownElement.style.borderBottomLeftRadius = 12;
-                rootContainer.Add(historyDropdownElement);
+                historyOverlayElement.Add(historyDropdownElement);
 
                 var historyHeaderBarElement = new VisualElement { name = "historyHeaderBar" };
                 historyHeaderBarElement.AddToClassList("history-header");

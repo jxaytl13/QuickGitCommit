@@ -103,6 +103,14 @@ namespace TLNexus.GitU
         private bool _autoOpenGitClientAfterCommit;
         private string _gitClientPath;
 
+        private readonly List<VisualElement> _contentEnterTargets = new List<VisualElement>();
+        private readonly List<IVisualElementScheduledItem> _contentEnterAnimItems = new List<IVisualElementScheduledItem>();
+
+        private const float ContentEnterOffsetY = 6f;
+        private const float ContentEnterDurationSeconds = 0.2f;
+        private const int ContentEnterStaggerMs = 10;
+        private const int MaxContentEnterAnimatedItems = 30;
+
         private const float LanguageDropdownWidth = 120f;
 
         private static readonly Color Accent = new Color(57f / 255f, 209f / 255f, 157f / 255f, 1f);
@@ -433,19 +441,31 @@ namespace TLNexus.GitU
             _toolIntroductionLabel.style.unityTextAlign = TextAnchor.UpperLeft;
 
             scrollContent.Add(_versionLabel);
+            _contentEnterTargets.Add(_versionLabel);
             scrollContent.Add(_authorLabel);
+            _contentEnterTargets.Add(_authorLabel);
             scrollContent.Add(_authorLinkButton);
+            _contentEnterTargets.Add(_authorLinkButton);
             scrollContent.Add(_documentLinkButton);
+            _contentEnterTargets.Add(_documentLinkButton);
             scrollContent.Add(languageRow);
+            _contentEnterTargets.Add(languageRow);
 
             scrollContent.Add(_featuresTitleLabel);
+            _contentEnterTargets.Add(_featuresTitleLabel);
             scrollContent.Add(_autoSaveBeforeOpenRow);
+            _contentEnterTargets.Add(_autoSaveBeforeOpenRow);
             scrollContent.Add(_autoOpenGitClientAfterCommitCard);
+            _contentEnterTargets.Add(_autoOpenGitClientAfterCommitCard);
 
             scrollContent.Add(_configTitleLabel);
+            _contentEnterTargets.Add(_configTitleLabel);
             scrollContent.Add(_configPathLabel);
+            _contentEnterTargets.Add(_configPathLabel);
             scrollContent.Add(_toolsTitleLabel);
+            _contentEnterTargets.Add(_toolsTitleLabel);
             scrollContent.Add(_toolIntroductionLabel);
+            _contentEnterTargets.Add(_toolIntroductionLabel);
 
             // 组装
             _dialogRoot.Add(scroll);
@@ -464,6 +484,7 @@ namespace TLNexus.GitU
         {
             _overlayRoot.style.display = DisplayStyle.Flex;
             _overlayRoot.Focus();
+            StartContentEnterAnimation();
         }
 
         /// <summary>
@@ -471,6 +492,7 @@ namespace TLNexus.GitU
         /// </summary>
         public void Hide()
         {
+            StopContentEnterAnimation();
             _overlayRoot.style.display = DisplayStyle.None;
         }
 
@@ -491,6 +513,84 @@ namespace TLNexus.GitU
             {
                 Hide();
                 evt.StopPropagation();
+            }
+        }
+
+        private void StartContentEnterAnimation()
+        {
+            StopContentEnterAnimation(resetStyles: false);
+
+            var count = Mathf.Min(_contentEnterTargets.Count, MaxContentEnterAnimatedItems);
+            for (var i = 0; i < count; i++)
+            {
+                var element = _contentEnterTargets[i];
+                if (element == null)
+                {
+                    continue;
+                }
+
+                element.style.opacity = 0f;
+                element.style.top = ContentEnterOffsetY;
+
+                var delayMs = i * ContentEnterStaggerMs;
+                var startTime = EditorApplication.timeSinceStartup + delayMs / 1000.0;
+
+                IVisualElementScheduledItem scheduled = null;
+                scheduled = element.schedule.Execute(() =>
+                {
+                    if (element.panel == null || _overlayRoot.resolvedStyle.display == DisplayStyle.None)
+                    {
+                        scheduled?.Pause();
+                        return;
+                    }
+
+                    var t = (float)((EditorApplication.timeSinceStartup - startTime) / ContentEnterDurationSeconds);
+                    if (t <= 0f)
+                    {
+                        return;
+                    }
+
+                    t = Mathf.Clamp01(t);
+                    var eased = 1f - Mathf.Pow(1f - t, 3f);
+
+                    element.style.opacity = eased;
+                    element.style.top = Mathf.Lerp(ContentEnterOffsetY, 0f, eased);
+
+                    if (t >= 1f)
+                    {
+                        element.style.opacity = 1f;
+                        element.style.top = 0f;
+                        scheduled?.Pause();
+                    }
+                }).StartingIn(delayMs).Every(16);
+
+                _contentEnterAnimItems.Add(scheduled);
+            }
+        }
+
+        private void StopContentEnterAnimation(bool resetStyles = true)
+        {
+            for (var i = 0; i < _contentEnterAnimItems.Count; i++)
+            {
+                _contentEnterAnimItems[i]?.Pause();
+            }
+            _contentEnterAnimItems.Clear();
+
+            if (!resetStyles)
+            {
+                return;
+            }
+
+            for (var i = 0; i < _contentEnterTargets.Count; i++)
+            {
+                var element = _contentEnterTargets[i];
+                if (element == null)
+                {
+                    continue;
+                }
+
+                element.style.opacity = 1f;
+                element.style.top = 0f;
             }
         }
 
