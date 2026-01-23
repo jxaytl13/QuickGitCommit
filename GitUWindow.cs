@@ -208,6 +208,7 @@ namespace TLNexus.GitU
         private Button repositoryStatusUpButton;
         private Label sortInfoLabel;
         private Button settingsButton;
+        private VisualElement historyOverlayRoot;
         private VisualElement historyDropdown;
         private ListView historyListView;
         private Label repositoryStatusLabel;
@@ -241,9 +242,17 @@ namespace TLNexus.GitU
         private readonly HashSet<int> listEnterAnimatedUnstagedIndices = new HashSet<int>();
         private readonly HashSet<int> listEnterAnimatedStagedIndices = new HashSet<int>();
         private const int MaxListEnterAnimatedItems = 20;
-        private const int ListEnterStaggerMs = 14;
+        private const int ListEnterStaggerMs = 10;
         private const float ListEnterOffsetY = 6f;
-        private const float ListEnterDurationSeconds = 0.25f;
+        private const float ListEnterDurationSeconds = 0.2f;
+
+        private int historyEnterAnimationToken;
+        private double historyEnterAnimationDisableTime;
+        private readonly HashSet<int> historyEnterAnimatedIndices = new HashSet<int>();
+        private const int MaxHistoryEnterAnimatedItems = 30;
+        private const int HistoryEnterStaggerMs = 10;
+        private const float HistoryEnterOffsetY = 6f;
+        private const float HistoryEnterDurationSeconds = 0.2f;
 
         private VisualElement sortMenuOverlay;
         private VisualElement sortMenuPanel;
@@ -275,6 +284,12 @@ namespace TLNexus.GitU
             public bool DragArmed;
             public Vector3 DragStartPosition;
 
+            public IVisualElementScheduledItem EnterAnimItem;
+        }
+
+        private sealed class HistoryRowRefs
+        {
+            public int BoundIndex;
             public IVisualElementScheduledItem EnterAnimItem;
         }
 
@@ -730,6 +745,15 @@ namespace TLNexus.GitU
             {
                 listEnterAnimationToken = 0;
                 listEnterAnimationDisableTime = 0;
+            }
+
+            if (historyEnterAnimationToken > 0 &&
+                historyEnterAnimationDisableTime > 0 &&
+                EditorApplication.timeSinceStartup >= historyEnterAnimationDisableTime)
+            {
+                historyEnterAnimationToken = 0;
+                historyEnterAnimationDisableTime = 0;
+                historyEnterAnimatedIndices.Clear();
             }
 
             if (notificationEndTime > 0 && EditorApplication.timeSinceStartup >= notificationEndTime)
@@ -1320,6 +1344,7 @@ namespace TLNexus.GitU
                 historyListView.makeItem = () =>
                 {
                     var row = new VisualElement();
+                    row.userData = new HistoryRowRefs();
                     row.style.flexDirection = FlexDirection.Row;
                     row.style.alignItems = Align.Center;
                     row.style.height = StyleKeyword.Auto;
@@ -1356,6 +1381,18 @@ namespace TLNexus.GitU
                 };
                 historyListView.bindItem = (element, i) =>
                 {
+                    if (element?.userData is HistoryRowRefs refs)
+                    {
+                        refs.BoundIndex = i;
+                        refs.EnterAnimItem?.Pause();
+                        refs.EnterAnimItem = null;
+                    }
+
+                    element.style.opacity = 1f;
+                    element.style.top = 0f;
+
+                    MaybePlayHistoryEnterAnimation(element, i);
+
                     var label = element.Q<Label>("historyItemLabel");
                     if (label != null)
                     {
@@ -1426,8 +1463,8 @@ namespace TLNexus.GitU
 
             historyDropdown.style.width = desiredWidth;
             historyDropdown.style.height = desiredHeight;
-            historyDropdown.style.left = (hostWidth - desiredWidth) * 0.5f;
-            historyDropdown.style.top = (hostHeight - desiredHeight) * 0.5f;
+            historyDropdown.style.left = 0;
+            historyDropdown.style.top = 0;
         }
 
         private void EnsureSettingsOverlay()
@@ -1931,6 +1968,7 @@ namespace TLNexus.GitU
             repositoryStatusUpButton = root.Q<Button>("repositoryStatusUpButton");
             sortInfoLabel = root.Q<Label>("sortInfoLabel");
             settingsButton = root.Q<Button>("Setting");
+            historyOverlayRoot = root.Q<VisualElement>("historyOverlay");
             historyDropdown = root.Q<VisualElement>("historyDropdown");
             historyListView = root.Q<ListView>("historyListView");
             historyTitleLabel = root.Q<Label>("historyTitleLabel");
@@ -4233,7 +4271,7 @@ namespace TLNexus.GitU
 
         private void ToggleHistoryDropdown()
         {
-            if (historyDropdown == null || historyListView == null)
+            if (historyOverlayRoot == null || historyDropdown == null || historyListView == null)
             {
                 return;
             }
@@ -4256,7 +4294,14 @@ namespace TLNexus.GitU
             }
 
             historyDropdownVisible = true;
+            historyEnterAnimatedIndices.Clear();
+            historyEnterAnimationToken++;
+            historyEnterAnimationDisableTime = EditorApplication.timeSinceStartup + 1.2;
+
+            historyOverlayRoot.style.display = DisplayStyle.Flex;
+            historyOverlayRoot.BringToFront();
             historyDropdown.style.display = DisplayStyle.Flex;
+            historyDropdown.BringToFront();
             historyListView.itemsSource = commitHistory;
             historyListView.RefreshItems();
             historyListView.ClearSelection();
@@ -4265,14 +4310,90 @@ namespace TLNexus.GitU
 
         private void HideHistoryDropdown()
         {
-            if (historyDropdown == null)
+            if (historyOverlayRoot == null || historyDropdown == null)
             {
                 return;
             }
 
             historyDropdownVisible = false;
             historyDropdown.style.display = DisplayStyle.None;
+            historyOverlayRoot.style.display = DisplayStyle.None;
             historyListView?.ClearSelection();
+        }
+
+        private void MaybePlayHistoryEnterAnimation(VisualElement rowElement, int index)
+        {
+            if (rowElement == null)
+            {
+                return;
+            }
+
+            if (historyEnterAnimationToken <= 0)
+            {
+                rowElement.style.opacity = 1f;
+                rowElement.style.top = 0f;
+                return;
+            }
+
+            if (historyEnterAnimationDisableTime > 0 &&
+                EditorApplication.timeSinceStartup >= historyEnterAnimationDisableTime)
+            {
+                rowElement.style.opacity = 1f;
+                rowElement.style.top = 0f;
+                return;
+            }
+
+            if (index < 0 || index >= MaxHistoryEnterAnimatedItems)
+            {
+                rowElement.style.opacity = 1f;
+                rowElement.style.top = 0f;
+                return;
+            }
+
+            if (!historyEnterAnimatedIndices.Add(index))
+            {
+                return;
+            }
+
+            rowElement.style.opacity = 0f;
+            rowElement.style.top = HistoryEnterOffsetY;
+
+            var delayMs = index * HistoryEnterStaggerMs;
+            var startTime = EditorApplication.timeSinceStartup + delayMs / 1000.0;
+
+            IVisualElementScheduledItem scheduled = null;
+            scheduled = rowElement.schedule.Execute(() =>
+            {
+                if (rowElement.panel == null || !historyDropdownVisible)
+                {
+                    scheduled?.Pause();
+                    return;
+                }
+
+                var t = (float)((EditorApplication.timeSinceStartup - startTime) / HistoryEnterDurationSeconds);
+                if (t <= 0f)
+                {
+                    return;
+                }
+
+                t = Mathf.Clamp01(t);
+                var eased = 1f - Mathf.Pow(1f - t, 3f);
+
+                rowElement.style.opacity = eased;
+                rowElement.style.top = Mathf.Lerp(HistoryEnterOffsetY, 0f, eased);
+
+                if (t >= 1f)
+                {
+                    rowElement.style.opacity = 1f;
+                    rowElement.style.top = 0f;
+                    scheduled?.Pause();
+                }
+            }).StartingIn(delayMs).Every(16);
+
+            if (rowElement.userData is HistoryRowRefs refs)
+            {
+                refs.EnterAnimItem = scheduled;
+            }
         }
 
         private void OnHistoryListSelectionChanged(IEnumerable<object> items)
@@ -4341,6 +4462,11 @@ namespace TLNexus.GitU
                 if (dragBadge != null && dragBadge.style.display.value != DisplayStyle.None)
                 {
                     QueueDragBadgeCleanup();
+                }
+
+                if (historyDropdownVisible)
+                {
+                    HideHistoryDropdown();
                 }
 
                 return;
