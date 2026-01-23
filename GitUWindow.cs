@@ -235,6 +235,16 @@ namespace TLNexus.GitU
         private bool assetListViewsConfigured;
         private bool visibleListsInitialized;
 
+        private bool listEnterAnimationPending;
+        private int listEnterAnimationToken;
+        private double listEnterAnimationDisableTime;
+        private readonly HashSet<int> listEnterAnimatedUnstagedIndices = new HashSet<int>();
+        private readonly HashSet<int> listEnterAnimatedStagedIndices = new HashSet<int>();
+        private const int MaxListEnterAnimatedItems = 20;
+        private const int ListEnterStaggerMs = 14;
+        private const float ListEnterOffsetY = 6f;
+        private const float ListEnterDurationSeconds = 0.25f;
+
         private VisualElement sortMenuOverlay;
         private VisualElement sortMenuPanel;
         private int sortMenuPositionRequestId;
@@ -264,10 +274,21 @@ namespace TLNexus.GitU
 
             public bool DragArmed;
             public Vector3 DragStartPosition;
+
+            public IVisualElementScheduledItem EnterAnimItem;
         }
 
         // Notification
         private double notificationEndTime;
+        private bool toastEnterAnimating;
+        private double toastEnterAnimStartTime;
+        private bool toastExitAnimating;
+        private double toastExitAnimStartTime;
+        private float toastExitStartOpacity;
+        private float toastExitStartMarginTop;
+        private const float ToastEnterOffsetY = 100f;
+        private const float ToastEnterDurationSeconds = 0.18f;
+        private const float ToastExitDurationSeconds = 0.18f;
 
         [MenuItem("Assets/T\u00b7L NEXUS/GitU", false, 2000)]
         private static void OpenFromContext()
@@ -703,15 +724,62 @@ namespace TLNexus.GitU
 
         private void Update()
         {
+            if (listEnterAnimationToken > 0 &&
+                listEnterAnimationDisableTime > 0 &&
+                EditorApplication.timeSinceStartup >= listEnterAnimationDisableTime)
+            {
+                listEnterAnimationToken = 0;
+                listEnterAnimationDisableTime = 0;
+            }
+
             if (notificationEndTime > 0 && EditorApplication.timeSinceStartup >= notificationEndTime)
             {
-                if (toastLabel != null)
+                notificationEndTime = 0;
+                StartToastExitAnimation();
+            }
+
+            if (toastEnterAnimating &&
+                toastLabel != null &&
+                toastLabel.style.display.value != DisplayStyle.None)
+            {
+                var t = (float)((EditorApplication.timeSinceStartup - toastEnterAnimStartTime) / ToastEnterDurationSeconds);
+                t = Mathf.Clamp01(t);
+
+                // Ease-out cubic.
+                var eased = 1f - Mathf.Pow(1f - t, 3f);
+
+                toastLabel.style.opacity = eased;
+                toastLabel.style.marginTop = Mathf.Lerp(ToastEnterOffsetY, 0f, eased);
+
+                if (t >= 1f)
                 {
+                    toastEnterAnimating = false;
+                    toastLabel.style.opacity = 1f;
+                    toastLabel.style.marginTop = 0;
+                }
+            }
+
+            if (toastExitAnimating &&
+                toastLabel != null &&
+                toastLabel.style.display.value != DisplayStyle.None)
+            {
+                var t = (float)((EditorApplication.timeSinceStartup - toastExitAnimStartTime) / ToastExitDurationSeconds);
+                t = Mathf.Clamp01(t);
+
+                // Ease-in cubic.
+                var eased = t * t * t;
+
+                toastLabel.style.opacity = Mathf.Lerp(toastExitStartOpacity, 0f, eased);
+                toastLabel.style.marginTop = Mathf.Lerp(toastExitStartMarginTop, ToastEnterOffsetY, eased);
+
+                if (t >= 1f)
+                {
+                    toastExitAnimating = false;
                     toastLabel.style.display = DisplayStyle.None;
                     toastLabel.text = string.Empty;
+                    toastLabel.style.opacity = 1f;
+                    toastLabel.style.marginTop = 0;
                 }
-
-                notificationEndTime = 0;
             }
 
             // DragAndDrop 的结束事件在 UI Toolkit 下并不总能可靠回调（例如拖拽过程中回到源区域松开）。
@@ -1065,6 +1133,7 @@ namespace TLNexus.GitU
             {
                 toastLabel.text = message;
                 toastLabel.style.display = DisplayStyle.Flex;
+                StartToastEnterAnimation();
                 notificationEndTime = EditorApplication.timeSinceStartup + seconds;
             }
         }
@@ -1076,9 +1145,43 @@ namespace TLNexus.GitU
                 return;
             }
 
-            toastLabel.style.display = DisplayStyle.None;
-            toastLabel.text = string.Empty;
             notificationEndTime = 0;
+            StartToastExitAnimation();
+        }
+
+        private void StartToastEnterAnimation()
+        {
+            if (toastLabel == null)
+            {
+                return;
+            }
+
+            toastEnterAnimating = true;
+            toastEnterAnimStartTime = EditorApplication.timeSinceStartup;
+            toastExitAnimating = false;
+            toastLabel.style.opacity = 0f;
+            toastLabel.style.marginTop = ToastEnterOffsetY;
+        }
+
+        private void StartToastExitAnimation()
+        {
+            if (toastLabel == null)
+            {
+                return;
+            }
+
+            if (toastLabel.style.display.value == DisplayStyle.None)
+            {
+                return;
+            }
+
+            toastEnterAnimating = false;
+            toastExitAnimating = true;
+            toastExitAnimStartTime = EditorApplication.timeSinceStartup;
+
+            // Snapshot current visuals so exiting from mid-enter is smooth.
+            toastExitStartOpacity = toastLabel.resolvedStyle.opacity;
+            toastExitStartMarginTop = toastLabel.resolvedStyle.marginTop;
         }
 
         private void CreateGUI()
@@ -1099,6 +1202,7 @@ namespace TLNexus.GitU
             visibleUnstagedItems.Clear();
             visibleStagedItems.Clear();
             visibleListsInitialized = false;
+            listEnterAnimationPending = true;
 
             var root = rootVisualElement;
             root.Clear();
@@ -3666,6 +3770,17 @@ namespace TLNexus.GitU
             statusMessage = infoMessages.Count > 0 ? string.Join("\n", infoMessages) : string.Empty;
             UpdateHeaderLabels();
             UpdateCommitButtonsEnabled();
+
+            // 仅在窗口首次加载时播放一次列表入场动画；后续刷新不播放。
+            if (listEnterAnimationPending)
+            {
+                listEnterAnimationPending = false;
+                listEnterAnimationToken++;
+                listEnterAnimationDisableTime = EditorApplication.timeSinceStartup + 1.2;
+                listEnterAnimatedUnstagedIndices.Clear();
+                listEnterAnimatedStagedIndices.Clear();
+            }
+
             RefreshListViews();
             ForceRepaintUI();
         }
@@ -5848,6 +5963,12 @@ namespace TLNexus.GitU
                 return;
             }
 
+            // Ensure a recycled row never keeps animation visuals.
+            refs.EnterAnimItem?.Pause();
+            refs.EnterAnimItem = null;
+            element.style.opacity = 1f;
+            element.style.top = 0;
+
             var list = stagedView ? visibleStagedItems : visibleUnstagedItems;
             if (index < 0 || index >= list.Count)
             {
@@ -5898,6 +6019,8 @@ namespace TLNexus.GitU
 
                 return;
             }
+
+            MaybePlayListEnterAnimation(element, index, stagedView);
 
             if (refs.IconContainer != null)
             {
@@ -6029,6 +6152,76 @@ namespace TLNexus.GitU
                 }
 
                 refs.PathLabel.text = $"{displayPath} ｜ {timeText}";
+            }
+        }
+
+        private void MaybePlayListEnterAnimation(VisualElement rowElement, int index, bool stagedView)
+        {
+            if (listEnterAnimationToken <= 0)
+            {
+                return;
+            }
+
+            if (listEnterAnimationDisableTime > 0 &&
+                EditorApplication.timeSinceStartup >= listEnterAnimationDisableTime)
+            {
+                return;
+            }
+
+            if (index < 0 || index >= MaxListEnterAnimatedItems)
+            {
+                return;
+            }
+
+            var set = stagedView ? listEnterAnimatedStagedIndices : listEnterAnimatedUnstagedIndices;
+            if (!set.Add(index))
+            {
+                return;
+            }
+
+            if (rowElement == null)
+            {
+                return;
+            }
+
+            rowElement.style.opacity = 0f;
+            rowElement.style.top = ListEnterOffsetY;
+
+            var delayMs = index * ListEnterStaggerMs;
+            var startTime = EditorApplication.timeSinceStartup + delayMs / 1000.0;
+
+            IVisualElementScheduledItem scheduled = null;
+            scheduled = rowElement.schedule.Execute(() =>
+            {
+                if (rowElement.panel == null)
+                {
+                    scheduled?.Pause();
+                    return;
+                }
+
+                var t = (float)((EditorApplication.timeSinceStartup - startTime) / ListEnterDurationSeconds);
+                if (t <= 0f)
+                {
+                    return;
+                }
+
+                t = Mathf.Clamp01(t);
+                var eased = 1f - Mathf.Pow(1f - t, 3f);
+
+                rowElement.style.opacity = eased;
+                rowElement.style.top = Mathf.Lerp(ListEnterOffsetY, 0f, eased);
+
+                if (t >= 1f)
+                {
+                    rowElement.style.opacity = 1f;
+                    rowElement.style.top = 0;
+                    scheduled?.Pause();
+                }
+            }).StartingIn(delayMs).Every(16);
+
+            if (rowElement.userData is AssetRowRefs refs)
+            {
+                refs.EnterAnimItem = scheduled;
             }
         }
 
