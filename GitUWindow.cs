@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Threading.Tasks;
+using System.Text.RegularExpressions;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -156,6 +157,9 @@ namespace TLNexus.GitU
         private List<string> savedCommitHistory;
         private List<string> fallbackCommitHistory;
         private bool hasAttemptedLoadGitHistory;
+        private Task<CommitHistoryGitQueryResult> commitHistoryGitRefreshTask;
+        private double lastCommitHistoryGitRefreshTime;
+        private const double CommitHistoryGitRefreshCooldownSeconds = 10.0;
         private bool historyDropdownVisible;
         private int unstagedSelectionAnchorIndex = -1;
         private int stagedSelectionAnchorIndex = -1;
@@ -291,6 +295,18 @@ namespace TLNexus.GitU
         {
             public int BoundIndex;
             public IVisualElementScheduledItem EnterAnimItem;
+        }
+
+        private sealed class CommitHistoryGitQueryResult
+        {
+            public readonly List<string> Messages;
+            public readonly string Error;
+
+            public CommitHistoryGitQueryResult(List<string> messages, string error)
+            {
+                Messages = messages ?? new List<string>();
+                Error = error;
+            }
         }
 
         // Notification
@@ -824,6 +840,7 @@ namespace TLNexus.GitU
             PollGitOperationTask();
             PollDebouncedRefresh();
             PollDebouncedListViewRefresh();
+            PollCommitHistoryGitRefreshTask();
         }
 
         private void OnFocus()
@@ -4277,15 +4294,6 @@ namespace TLNexus.GitU
             }
 
             EnsureCommitHistoryLoaded(loadGitHistory: true);
-            if (!HasCommitHistory())
-            {
-                EditorUtility.DisplayDialog(
-                    isChineseUi ? "提交记录" : "Commit History",
-                    isChineseUi ? "暂无提交记录" : "No commit history.",
-                    isChineseUi ? "确定" : "OK");
-                UpdateHistoryButtonState();
-                return;
-            }
 
             if (historyDropdownVisible)
             {
@@ -4306,6 +4314,11 @@ namespace TLNexus.GitU
             historyListView.RefreshItems();
             historyListView.ClearSelection();
             UpdateHistoryDropdownLayout();
+
+            if (!HasCommitHistory() && historyHintLabel != null)
+            {
+                historyHintLabel.text = isChineseUi ? "正在加载提交记录..." : "Loading commit history...";
+            }
         }
 
         private void HideHistoryDropdown()
@@ -4569,9 +4582,7 @@ namespace TLNexus.GitU
             {
                 if (loadGitHistory)
                 {
-                    RefreshFallbackCommitHistory();
-                    FilterSavedCommitHistoryToCurrentUser();
-                    RebuildCommitHistoryDisplay();
+                    RequestCommitHistoryGitRefresh();
                 }
                 return;
             }
@@ -4631,12 +4642,237 @@ namespace TLNexus.GitU
                 }
             }
 
+            RebuildCommitHistoryDisplay();
+
             if (loadGitHistory)
             {
-                RefreshFallbackCommitHistory();
-                FilterSavedCommitHistoryToCurrentUser();
+                RequestCommitHistoryGitRefresh(force: true);
             }
+        }
+
+        private void RequestCommitHistoryGitRefresh(bool force = false)
+        {
+            if (commitHistoryGitRefreshTask != null && !commitHistoryGitRefreshTask.IsCompleted)
+            {
+                return;
+            }
+
+            var now = EditorApplication.timeSinceStartup;
+            if (!force && now - lastCommitHistoryGitRefreshTime < CommitHistoryGitRefreshCooldownSeconds)
+            {
+                return;
+            }
+
+            hasAttemptedLoadGitHistory = true;
+
+            var gitRoot = GitUtility.ProjectRoot;
+            if (string.IsNullOrWhiteSpace(gitRoot))
+            {
+                lastCommitHistoryGitRefreshTime = now;
+                return;
+            }
+
+            var queryCount = Mathf.Max(500, MaxCommitHistoryDisplayEntries);
+            commitHistoryGitRefreshTask = Task.Run(() =>
+                QueryRecentGitCommitMessagesForCurrentUser(gitRoot, queryCount));
+        }
+
+        private void PollCommitHistoryGitRefreshTask()
+        {
+            if (commitHistoryGitRefreshTask == null || !commitHistoryGitRefreshTask.IsCompleted)
+            {
+                return;
+            }
+
+            CommitHistoryGitQueryResult queryResult;
+            try
+            {
+                queryResult = commitHistoryGitRefreshTask.Result ?? new CommitHistoryGitQueryResult(new List<string>(), null);
+            }
+            catch (Exception ex)
+            {
+                queryResult = new CommitHistoryGitQueryResult(new List<string>(), ex.Message);
+            }
+
+            commitHistoryGitRefreshTask = null;
+            lastCommitHistoryGitRefreshTime = EditorApplication.timeSinceStartup;
+
+            if (!string.IsNullOrEmpty(queryResult.Error))
+            {
+                Debug.LogWarning(isChineseUi
+                    ? $"GitU: 读取 Git 提交记录失败: {queryResult.Error}"
+                    : $"GitU: Failed to read Git commit history: {queryResult.Error}");
+            }
+
+            var myMessages = queryResult.Messages ?? new List<string>();
+            fallbackCommitHistory = myMessages.Count > 0
+                ? myMessages.Take(MaxCommitHistoryDisplayEntries).ToList()
+                : new List<string>();
+
+            FilterSavedCommitHistoryToCurrentUser(myMessages);
             RebuildCommitHistoryDisplay();
+            UpdateHistoryButtonState();
+
+            if (historyDropdownVisible && historyListView != null)
+            {
+                historyListView.itemsSource = commitHistory;
+                historyListView.RefreshItems();
+            }
+
+            if (historyHintLabel != null)
+            {
+                if (HasCommitHistory())
+                {
+                    historyHintLabel.text = isChineseUi ? "提示：最多显示前100条记录" : "Hint: up to 100 entries";
+                }
+                else
+                {
+                    historyHintLabel.text = isChineseUi ? "暂无提交记录" : "No commit history.";
+                }
+            }
+        }
+
+        private static CommitHistoryGitQueryResult QueryRecentGitCommitMessagesForCurrentUser(string gitRoot, int maxCount)
+        {
+            if (string.IsNullOrWhiteSpace(gitRoot))
+            {
+                return new CommitHistoryGitQueryResult(new List<string>(), "Git root not found.");
+            }
+
+            if (maxCount <= 0)
+            {
+                return new CommitHistoryGitQueryResult(new List<string>(), null);
+            }
+
+            if (!TryGetGitConfigValueNoUnity(gitRoot, "user.email", out var email, out var emailError) || string.IsNullOrWhiteSpace(email))
+            {
+                if (!TryGetGitConfigValueNoUnity(gitRoot, "user.name", out var name, out var nameError) || string.IsNullOrWhiteSpace(name))
+                {
+                    var error = !string.IsNullOrEmpty(emailError) ? emailError : nameError;
+                    return new CommitHistoryGitQueryResult(new List<string>(), error);
+                }
+
+                email = name;
+            }
+
+            var authorPattern = Regex.Escape(email.Trim());
+            var args = $"log -n {maxCount} --format=%s --no-merges --author={QuoteGitArgument(authorPattern)}";
+            if (!TryRunGitProcessNoUnity(gitRoot, args, 30_000, out var output, out var errorText))
+            {
+                return new CommitHistoryGitQueryResult(new List<string>(), string.IsNullOrWhiteSpace(errorText) ? "git log failed." : errorText);
+            }
+
+            var results = new List<string>();
+            var lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (var line in lines)
+            {
+                var trimmed = line.Trim();
+                if (!string.IsNullOrEmpty(trimmed))
+                {
+                    results.Add(trimmed);
+                }
+            }
+
+            return new CommitHistoryGitQueryResult(results, null);
+        }
+
+        private static bool TryGetGitConfigValueNoUnity(string gitRoot, string key, out string value, out string error)
+        {
+            value = null;
+            error = null;
+
+            if (string.IsNullOrWhiteSpace(gitRoot) || string.IsNullOrWhiteSpace(key))
+            {
+                return false;
+            }
+
+            if (!TryRunGitProcessNoUnity(gitRoot, $"config --get {key}", 10_000, out var output, out var stderr))
+            {
+                error = stderr;
+                return false;
+            }
+
+            var firstLine = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                                  .Select(line => line.Trim())
+                                  .FirstOrDefault(line => !string.IsNullOrEmpty(line));
+            if (string.IsNullOrEmpty(firstLine))
+            {
+                return false;
+            }
+
+            value = firstLine;
+            return true;
+        }
+
+        private static string QuoteGitArgument(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return "\"\"";
+            }
+
+            return $"\"{value.Replace("\"", "\\\"")}\"";
+        }
+
+        private static bool TryRunGitProcessNoUnity(string workingDirectory, string arguments, int timeoutMilliseconds, out string standardOutput, out string standardError)
+        {
+            standardOutput = string.Empty;
+            standardError = string.Empty;
+
+            if (string.IsNullOrWhiteSpace(workingDirectory))
+            {
+                standardError = "Working directory is missing.";
+                return false;
+            }
+
+            try
+            {
+                var startInfo = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "git",
+                    Arguments = arguments ?? string.Empty,
+                    WorkingDirectory = workingDirectory,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true
+                };
+
+                startInfo.EnvironmentVariables["GIT_TERMINAL_PROMPT"] = "0";
+
+                using (var process = new System.Diagnostics.Process { StartInfo = startInfo })
+                {
+                    process.Start();
+
+                    var stdoutTask = process.StandardOutput.ReadToEndAsync();
+                    var stderrTask = process.StandardError.ReadToEndAsync();
+
+                    if (!process.WaitForExit(timeoutMilliseconds))
+                    {
+                        try
+                        {
+                            process.Kill();
+                        }
+                        catch
+                        {
+                            // ignored
+                        }
+
+                        standardError = "Git process timed out.";
+                        return false;
+                    }
+
+                    Task.WaitAll(stdoutTask, stderrTask);
+                    standardOutput = stdoutTask.Result ?? string.Empty;
+                    standardError = stderrTask.Result ?? string.Empty;
+                    return process.ExitCode == 0;
+                }
+            }
+            catch (Exception ex)
+            {
+                standardError = ex.Message;
+                return false;
+            }
         }
 
         private void RefreshFallbackCommitHistory()
@@ -4672,6 +4908,11 @@ namespace TLNexus.GitU
                 myMessages = null;
             }
 
+            FilterSavedCommitHistoryToCurrentUser(myMessages);
+        }
+
+        private void FilterSavedCommitHistoryToCurrentUser(List<string> myMessages)
+        {
             if (myMessages == null || myMessages.Count == 0)
             {
                 Debug.LogWarning(isChineseUi

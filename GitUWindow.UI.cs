@@ -1469,7 +1469,7 @@ namespace TLNexus.GitU
                 historyDropdownElement.style.paddingRight = 0;
                 historyDropdownElement.style.paddingBottom = 0;
                 historyDropdownElement.style.paddingLeft = 0;
-                historyDropdownElement.style.backgroundColor = Html("#111115");
+                historyDropdownElement.style.backgroundColor = Rgb(20, 20, 20);
                 historyDropdownElement.style.borderTopWidth = 1;
                 historyDropdownElement.style.borderRightWidth = 1;
                 historyDropdownElement.style.borderBottomWidth = 1;
